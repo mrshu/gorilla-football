@@ -86,6 +86,62 @@ own line and moves to intercept after a reaction delay, collects loose balls
 inside its box, holds briefly, then distributes to the best-scoring open
 teammate or clears long.
 
+## The stadium view
+
+`src/ui/camera.js` is a perspective camera with no matrices: a look-at basis
+(`forward`, `right`, `up`), a focal length from the field of view, and a divide
+by depth. `project()` turns a world point into canvas pixels plus a
+`scale` in pixels per metre at that depth, which is all the renderer needs to
+size a player or a ball. `screenToGround()` casts the inverse ray and
+intersects the grass, which is how a finger position becomes a point on the
+pitch.
+
+`frameBall()` places the camera behind the ball looking towards the goal that
+team is attacking. It tracks the ball sideways only partially, and its eye and
+target track by similar amounts, which keeps the camera's axis nearly parallel
+to the touchlines: the pitch slides rather than swinging. The constants were
+chosen by a search over the parameter space that required the ball to project
+inside the canvas from every point on the pitch at four screen sizes, and
+`test/camera.test.js` re-checks that on every run.
+
+`src/ui/renderer3d.js` paints back to front: sky, surrounding ground, the four
+terraces, the grass and its lines, both goals, then players and the ball sorted
+by depth. Straight pitch lines are drawn as a chain of short segments so
+perspective bends them correctly. Quads whose corners fall behind the camera are
+skipped, so the long terraces are drawn in segments and only the part actually
+behind the lens disappears. Crowds are a fixed hash per seat, so they never
+shimmer between frames.
+
+Nothing here is a dependency: it is arithmetic on the same 2D canvas context the
+top-down renderer uses.
+
+## Whole-team control
+
+The default control style gives the human no player to steer. Everyone,
+including the human's nominal footballer, is driven by the outfield AI. The
+human's entire input is the ball:
+
+- `aimKick(human, dir, power)` queues a kick, and `applyAimInputs()` plays it at
+  the top of the next step so a release lands on the frame the finger lifted.
+- `playBall()` turns direction and power into one kick. There is no pass/shoot
+  distinction: speed runs from `AIM.minSpeed` to the kicker's shot speed, aim
+  error grows with power and shrinks with the kicker's accuracy, and power above
+  `AIM.loftPower` lifts the ball. A kick aimed at goal from range is recorded as
+  a shot for the statistics, nothing more.
+- `press(human)` sends the nearest defender in, for a tap with no drag.
+- `canKick(human)` gates all of it on that human's team actually having the
+  ball, or being the taker at a restart.
+
+`aiMayActFor(p)` is the hinge. For a carrier on a human's team the AI is not
+allowed to shoot or pass, so the ball waits for the person holding the phone.
+After `AIM.holdGrace` seconds it is allowed again, so an unattended match still
+flows. The opposition is never restrained.
+
+`src/ui/aiminput.js` converts pointers into that input. A drag is measured in
+pixels and converted to a ground direction through the camera, so dragging
+towards the top of the screen always sends the ball away from you. Each human
+owns a screen zone, so two people can share one device.
+
 ## Assisted control and decision pauses
 
 Manual control is the default: the human drives their footballer with the

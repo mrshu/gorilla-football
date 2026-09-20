@@ -72,4 +72,16 @@ export const DECISION = Object.freeze({
   carryGap: 5, // seconds of uninterrupted carrying before asking again
 });
 
+// Whole-team aim control: how a held-and-released drag becomes a kick.
+export const AIM = Object.freeze({
+  minSpeed: 9, // m/s at zero power
+  baseSpread: 0.035, // radians of error even at a gentle tap
+  powerSpread: 0.075, // extra error at full power
+  loftPower: 0.55, // power above which the ball starts to rise
+  loftScale: 11, // vertical speed per unit of power above loftPower
+  maxDragPx: 170, // screen drag length that counts as full power
+  tapPx: 14, // a drag shorter than this is a tap, not a kick
+  holdGrace: 6, // seconds a carrier waits for you before playing it themselves
+});
+
 export const ROLES = Object.freeze({ GK: 'GK', DF: 'DF', MF: 'MF', FW: 'FW' });

@@ -2,7 +2,7 @@
 // rules and match flow with a fixed time step. UI code reads state and
 // drains `events`; controllers push human input via setHumanInput().
 
-import { PITCH, PHYSICS, TIMING, STATES, SET_PIECES, ROLES, DECISION } from './constants.js';
+import { PITCH, PHYSICS, TIMING, STATES, SET_PIECES, ROLES, DECISION, AIM } from './constants.js';
 import { add, sub, scale, norm, len, dist, clamp, dot, clampLen, lerp, fromAngle, angle } from './vec.js';
 import { createRng } from './rng.js';
 import { createTeam, createPlayer, createBall, slotWorldPos, relToWorld, goalCenter } from './entities.js';
@@ -30,6 +30,12 @@ export class Match {
     // Assisted play: the AI runs the human's footballer and the match freezes
     // whenever they have a choice worth making.
     this.assist = Boolean(config.assist);
+    // Whole-team control: everyone is AI-driven and the human plays the ball
+    // by aiming and releasing. `aimKick` is set by the UI for one frame.
+    this.aimControl = Boolean(config.aimControl);
+    this.aimKicks = config.humans.map(() => null);
+    this.presses = config.humans.map(() => false);
+    this.aimHold = null; // { playerId, since } while a human's team carries
     this.pendingDecision = null;
     this.decisionCarry = null;
     this.stats = { shots: [0, 0], fouls: [0, 0], offsides: [0, 0], saves: [0, 0], specials: [0, 0] };
@@ -134,6 +140,7 @@ export class Match {
     // A pending decision freezes everything: the clock, the ball and all 22
     // players. Nothing advances until resolveDecision() is called.
     if (this.pendingDecision) return;
+    if (this.aimControl) this.applyAimInputs();
     this.time += dt;
     this.tickTimers(dt);
 
@@ -355,6 +362,16 @@ export class Match {
 
     const humanIdx = taker.human;
     const waited = sp.timer - lerpDur;
+    if (this.aimControl) {
+      // Whoever is on that team takes it; the human aims and releases.
+      const human = this.config.humans.find((h) => h.team === taker.team);
+      if (human) {
+        if (waited > TIMING.setPieceHumanTimeout) this.takeSetPiece(taker, 'auto', null);
+        return;
+      }
+      if (waited > TIMING.setPieceAiDelay) this.takeSetPiece(taker, 'auto', null);
+      return;
+    }
     if (humanIdx !== null && humanIdx !== undefined) {
       if (this.assist) {
         // Assisted play: freeze and ask, instead of waiting for a button.
@@ -427,7 +444,7 @@ export class Match {
     this.frameCache = this.buildFrameCache(ballOwner);
     for (const p of this.players) {
       if (p.sentOff) continue;
-      const input = p.human !== null ? this.humanInputs[p.human] : null;
+      const input = p.human !== null && !this.aimControl ? this.humanInputs[p.human] : null;
       if (input && !this.assist) this.controlHuman(p, input, dt);
       else if (input) this.controlAssistedHuman(p, input, dt);
       else if (p.isGK) updateGoalkeeper(this, p, dt);
@@ -445,7 +462,174 @@ export class Match {
     if (this.state !== STATES.PLAY) return;
     this.checkOutOfPlay();
     if (this.state !== STATES.PLAY) return;
+    this.trackAimHold();
     this.maybeOpenDecision(prevOwner);
+  }
+
+  trackAimHold() {
+    if (!this.aimControl) return;
+    const owner = this.ball.owner !== null ? this.getPlayer(this.ball.owner) : null;
+    if (!owner || !this.isHumanTeam(owner.team)) {
+      this.aimHold = null;
+      return;
+    }
+    if (!this.aimHold || this.aimHold.playerId !== owner.id) {
+      this.aimHold = { playerId: owner.id, since: this.time };
+    }
+  }
+
+  // ------------------------------------------------------ whole-team play
+  //
+  // One touch runs the match: hold to aim, release to play the ball. The
+  // human never steers a player, so possession is whoever on their team has
+  // the ball. A release with no aim is a press instead of a kick.
+
+  // Teams with a human on them in whole-team play. Their ball carrier waits
+  // for the human instead of deciding for itself.
+  isHumanTeam(teamIndex) {
+    return this.aimControl && this.config.humans.some((h) => h.team === teamIndex);
+  }
+
+  // May the AI play the ball off this carrier's foot, or must it wait for the
+  // person holding the phone? It waits, but not forever: after a grace period
+  // it plays on so an idle match still flows.
+  aiMayActFor(p) {
+    if (this.isAssisted(p)) return false;
+    if (!this.aimControl || !this.isHumanTeam(p.team)) return true;
+    const hold = this.aimHold;
+    if (!hold || hold.playerId !== p.id) return false;
+    return this.time - hold.since > AIM.holdGrace;
+  }
+
+  // Who a human is "playing through" right now: their ball carrier, else the
+  // teammate nearest the ball.
+  activePlayerFor(humanIndex) {
+    const teamIndex = this.config.humans[humanIndex]?.team ?? 0;
+    const team = this.teams[teamIndex];
+    const owner = this.ball.owner !== null ? this.getPlayer(this.ball.owner) : null;
+    if (owner && owner.team === teamIndex) return owner;
+    let best = null;
+    let bestD = Infinity;
+    for (const p of team.players) {
+      if (p.sentOff || p.isGK) continue;
+      const d = dist(p.pos, this.ball.pos);
+      if (d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    }
+    return best;
+  }
+
+  // True when this human can play the ball right now.
+  canKick(humanIndex) {
+    if (!this.aimControl) return false;
+    const teamIndex = this.config.humans[humanIndex]?.team ?? 0;
+    if (this.state === STATES.PLAY) {
+      const owner = this.ball.owner !== null ? this.getPlayer(this.ball.owner) : null;
+      return Boolean(owner && owner.team === teamIndex && owner.kickCooldown <= 0);
+    }
+    if (this.state === STATES.SET_PIECE || this.state === STATES.KICKOFF) {
+      const sp = this.setPiece;
+      return Boolean(sp && sp.lerp >= 1 && this.getPlayer(sp.takerId).team === teamIndex);
+    }
+    return false;
+  }
+
+  // Queue a kick for this frame. `dir` is a unit vector on the pitch and
+  // `power` runs 0..1. Returns true if it was accepted.
+  aimKick(humanIndex, dir, power) {
+    if (!this.canKick(humanIndex)) return false;
+    const l = Math.hypot(dir.x, dir.y);
+    if (!Number.isFinite(l) || l < 1e-6) return false;
+    this.aimKicks[humanIndex] = { dir: { x: dir.x / l, y: dir.y / l }, power: clamp(power, 0, 1) };
+    return true;
+  }
+
+  // A tap with no aim: the nearest defender lunges at the carrier.
+  press(humanIndex) {
+    if (!this.aimControl) return false;
+    this.presses[humanIndex] = true;
+    return true;
+  }
+
+  // Apply queued kicks and presses. Called before the world is stepped so a
+  // release lands on the same frame the player let go.
+  applyAimInputs() {
+    for (let i = 0; i < this.aimKicks.length; i++) {
+      const kick = this.aimKicks[i];
+      this.aimKicks[i] = null;
+      if (!kick || !this.canKick(i)) continue;
+      const teamIndex = this.config.humans[i]?.team ?? 0;
+      if (this.state === STATES.SET_PIECE || this.state === STATES.KICKOFF) {
+        const taker = this.getPlayer(this.setPiece.takerId);
+        this.playBall(taker, kick, { setPieceKind: this.setPiece.kind });
+        continue;
+      }
+      const owner = this.getPlayer(this.ball.owner);
+      if (owner.team !== teamIndex) continue;
+      this.playBall(owner, kick, {});
+    }
+    for (let i = 0; i < this.presses.length; i++) {
+      if (!this.presses[i]) continue;
+      this.presses[i] = false;
+      this.pressWithNearest(i);
+    }
+  }
+
+  // One kick covers passing and shooting: the ball simply goes where it is
+  // aimed, as hard as it was hit.
+  playBall(kicker, { dir, power }, { setPieceKind = null } = {}) {
+    const speed = AIM.minSpeed + power * (kicker.phys.shotSpeed - AIM.minSpeed);
+    // Aiming is forgiving at low power and demanding at high power, and a
+    // better striker strays less either way.
+    const spread = (AIM.baseSpread + power * AIM.powerSpread) * (0.55 + kicker.phys.shotSpread);
+    const err = this.rng.gaussian() * spread;
+    const aimed = fromAngle(angle(dir) + err);
+    const lofted = power > AIM.loftPower;
+    const vz = lofted ? (power - AIM.loftPower) * AIM.loftScale : 0;
+    const goal = goalCenter(this.teams[kicker.team].attackDir);
+    const towardsGoal = dot(aimed, norm(sub(goal, kicker.pos))) > 0.86 && dist(kicker.pos, goal) < 40;
+    if (towardsGoal) this.stats.shots[kicker.team]++;
+    if (setPieceKind) {
+      this.state = STATES.PLAY;
+      const sp = this.setPiece;
+      this.setPiece = null;
+      this.ball.pos = { ...sp.pos };
+      this.ball.owner = kicker.id;
+      kicker.kickCooldown = 0;
+      this.kick(kicker, aimed, speed, { vz, kind: towardsGoal ? 'shot' : 'pass', noOffside: offsideExemptSetPiece(setPieceKind) });
+      if (setPieceKind === SET_PIECES.KICKOFF) this.emit('kickoff', { team: kicker.team });
+      this.emit('whistle');
+      return;
+    }
+    this.kick(kicker, aimed, speed, { vz, kind: towardsGoal ? 'shot' : 'pass' });
+    if (towardsGoal) this.emit('shot', { playerId: kicker.id, team: kicker.team });
+  }
+
+  pressWithNearest(humanIndex) {
+    const teamIndex = this.config.humans[humanIndex]?.team ?? 0;
+    const owner = this.ball.owner !== null ? this.getPlayer(this.ball.owner) : null;
+    const anchor = owner ? owner.pos : this.ball.pos;
+    let best = null;
+    let bestD = Infinity;
+    for (const p of this.teams[teamIndex].players) {
+      if (p.sentOff || p.isGK || p.tackleCooldown > 0 || p.stun > 0 || p.frozen > 0) continue;
+      const d = dist(p.pos, anchor);
+      if (d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    }
+    if (!best) return;
+    if (owner && owner.team !== teamIndex && bestD <= PHYSICS.tackleRange) {
+      this.attemptTackle(best, false);
+      return;
+    }
+    if (bestD <= PHYSICS.slideRange + 1.5) {
+      best.facing = norm(sub(anchor, best.pos));
+      this.startSlide(best);
+    }
   }
 
   buildFrameCache(ballOwner) {

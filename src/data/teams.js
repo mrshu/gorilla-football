@@ -5,7 +5,8 @@ export const TEAM_PRESETS = [
   {
     id: 'jungle',
     name: 'Jungle FC',
-    defaultJersey: 'green',
+    // Not green: a green kit disappears into the grass in the stadium view.
+    defaultJersey: 'orange',
     roster: ['tortoise', 'yeti', 'tortoise', 'gorilla', 'yeti', 'plumber', 'rocket', 'gorilla', 'penguin', 'gorilla', 'plumber'],
   },
   {

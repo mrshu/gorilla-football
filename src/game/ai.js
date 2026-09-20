@@ -95,9 +95,9 @@ function carryBall(match, p, dt) {
   const dGoal = dist(p.pos, goal);
   const nearOpp = nearestOpponentDistance(match, p);
   const pressure = nearOpp < 2.4;
-  // An assisted human's footballer runs itself but never decides for them:
-  // shooting and passing come from the decision panel instead.
-  const autoAct = !match.isAssisted(p);
+  // A human's carrier runs itself but does not decide for them: in assisted
+  // play the choice comes from the panel, in whole-team play from the aim.
+  const autoAct = match.aiMayActFor(p);
 
   if (autoAct && p.ai.decisionTimer <= 0) {
     p.ai.decisionTimer = 0.22;

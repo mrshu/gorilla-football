@@ -51,12 +51,14 @@ function possessionInPlay(m) {
   return p;
 }
 
-test('manual control is the default and assisted is opt-in', () => {
-  assert.equal(normalizeConfig({}).control, CONTROL.MANUAL);
+test('whole-team aim control is the default; the others are opt-in', () => {
+  assert.equal(normalizeConfig({}).control, CONTROL.AIM);
+  assert.equal(normalizeConfig({}).aimControl, true);
   assert.equal(normalizeConfig({}).assist, false);
+  assert.equal(normalizeConfig({ control: CONTROL.MANUAL }).control, CONTROL.MANUAL);
   assert.equal(normalizeConfig({ control: CONTROL.ASSISTED }).assist, true);
   // An unrecognised value falls back to the default rather than throwing.
-  assert.equal(normalizeConfig({ control: 'nonsense' }).control, CONTROL.MANUAL);
+  assert.equal(normalizeConfig({ control: 'nonsense' }).control, CONTROL.AIM);
 });
 
 test('the human player moves on their own with no input at all', () => {

@@ -1,16 +1,18 @@
 # Gorilla Football
 
-A mobile-first, top-down 11-a-side arcade football game for one or two players
-on a single phone or tablet. Plain HTML5 canvas and ES modules, no build step,
-no dependencies, no network calls.
+A mobile-first 11-a-side arcade football game for one or two players on a
+single phone or tablet, played from a 3D stadium camera. Plain HTML5 canvas
+and ES modules: no build step, no dependencies, no network calls, and no 3D
+library. The perspective is a hand-rolled projection, so the whole thing is
+still a few files you can read.
 
-You drive your footballer yourself with a joystick and three buttons. If you
-would rather have them run themselves and be asked what to do at the moments
-that matter, assisted control is one tap away on the setup screen.
+You run the whole team, not one striker. Hold anywhere to aim, drag for power,
+release to play the ball. There is no separate pass and shoot button: the ball
+goes exactly where you aimed, as hard as you hit it.
 
 ![A match in landscape](docs/screenshots/match.png)
 
-<img src="docs/screenshots/decision.png" width="240" alt="The decision panel, with pass lines drawn on the pitch"> <img src="docs/screenshots/setup.png" width="240" alt="Pre-match setup"> <img src="docs/screenshots/coop-portrait.png" width="240" alt="Two-player co-op in portrait">
+<img src="docs/screenshots/stadium-portrait.png" width="240" alt="The stadium camera in portrait"> <img src="docs/screenshots/aiming.png" width="240" alt="Aiming: the guide shows where the ball will go"> <img src="docs/screenshots/setup.png" width="240" alt="Pre-match setup">
 
 ## Run it
 
@@ -54,14 +56,34 @@ connections on port 8000.
 
 ## Controls
 
-You are one outfield player, marked with a ring. There are two control styles,
-chosen on the setup screen.
+Three control styles, chosen on the setup screen.
 
-### Manual, the default
+### Whole team, the default
 
-You drive your player the whole time and nothing ever pauses. Each player gets a
-floating joystick and three buttons on their own side of the screen. Touch
-anywhere in the joystick zone to place the stick under your thumb.
+A 3D stadium camera follows the ball. Every footballer on the pitch, yours
+included, runs themselves; your job is the ball.
+
+| Touch | What happens |
+| --- | --- |
+| **Hold** anywhere in your area | Start aiming. A guide shows where the ball will travel. |
+| **Drag** further from where you pressed | More power. A short drag rolls a pass along the grass, a long one drives a shot. |
+| **Release** | Play the ball exactly where you aimed. |
+| **Tap** without dragging, while they have it | Close the carrier down. |
+
+The player on the ball is ringed. Restarts work the same way: aim and release to
+take the throw, corner, free kick or penalty. Leave your carrier alone for six
+seconds and they will play it themselves, so a match never stalls.
+
+Two players share the one screen: in portrait the bottom half is player one and
+the top half player two; in landscape it splits left and right. Only the side in
+possession can kick, so the two never fight over the ball.
+
+### One player
+
+You drive a single outfield player, marked with a ring, seen from straight
+above. Nothing ever pauses. Each player gets a floating joystick and three
+buttons on their own side of the screen. Touch anywhere in the joystick zone to
+place the stick under your thumb.
 
 | Button | With the ball | Without the ball |
 | --- | --- | --- |
@@ -72,11 +94,10 @@ anywhere in the joystick zone to place the stick under your thumb.
 At a restart the taker aims with the joystick and presses PASS or SHOOT. After
 eight seconds they play it automatically so the game never stalls.
 
-### Assisted
+### One player, paced
 
-Pick it on the setup screen. Your footballer is then driven by the same AI as
-everyone else, and the match **freezes** at the moments where you have a genuine
-choice. A panel offers your options:
+Your footballer is driven by the same AI as everyone else, and the match
+**freezes** at the moments where you have a genuine choice. A panel offers your options:
 
 | Option | What it does |
 | --- | --- |
@@ -159,8 +180,12 @@ src/game/config.js      match configuration and validation
 src/game/match.js       the simulation: physics, possession, restarts, flow
 src/game/ai.js          outfield AI
 src/game/goalkeeper.js  goalkeeper AI
+src/ui/camera.js        perspective camera: projection and unprojection
+src/ui/renderer3d.js    3D stadium rendering (default)
+src/ui/aiminput.js      hold-aim-release touch input
+src/ui/hud.js           scoreboard, clock, cards, touch hint
 src/ui/layout.js        screen layout and touch-control geometry
-src/ui/renderer.js      canvas rendering
+src/ui/renderer.js      top-down canvas rendering (the one-player styles)
 src/ui/input.js         multi-touch, mouse and keyboard input
 src/ui/screens.js       DOM screens (menu, setup, pause, half time, full time)
 src/ui/app.js           application shell and game loop
@@ -178,8 +203,10 @@ scripts/simulate.js     headless match simulator
   that act through the `Match` API. Point a character's `abilityId` at it.
 - **Rules:** `src/game/rules.js` holds pure functions with no side effects, so
   rule variants can be swapped and unit-tested independently.
-- **Art:** `src/ui/renderer.js` draws generated vector shapes from each
-  character's `look` block. Swapping in sprite art means changing only that file.
+- **Art:** `src/ui/renderer3d.js` draws everything from each character's `look`
+  block by projecting plain shapes. Swapping in models or sprites means changing
+  only that file; `src/ui/camera.js` already hands it screen positions and a
+  pixels-per-metre scale for any world point.
 - **Formations:** add to `src/data/formations.js` using team-relative
   coordinates.
 
@@ -189,11 +216,17 @@ scripts/simulate.js     headless match simulator
 npm test
 ```
 
-Sixty-two tests covering out-of-play classification, offside in both
+Ninety-eight tests covering out-of-play classification, offside in both
 directions, tackle and card resolution, penalties, match flow (halves, side
 switching, kickoff after a goal), the Gorilla's ten guaranteed goals,
 sending-off and control handover, config validation, simulation determinism,
 and control layout at eight screen sizes.
+
+Whole-team play and the 3D camera have their own suites: projection and
+unprojection round-trip, handedness, the ball staying framed from every point on
+the pitch, drag-to-power, aim direction matching the drag on screen, kicks being
+refused when you do not have the ball, your carrier waiting for you but playing
+on eventually, and a full match reaching full time.
 
 Assisted control has its own suite: that the human's player moves with no input
 while a manual one does not, that the clock, ball and all twenty-two players are
@@ -216,11 +249,23 @@ asked about:
 - **One human controls one fixed player** rather than switching to whoever is
   nearest. Switching adds control ambiguity in two-player modes, and fixed
   control makes the character choice matter.
-- **Manual control is the default**, because driving your own player with the
-  joystick is the game people expect. Assisted control, where the AI runs your
-  footballer and the simulation freezes at decision points, is a setup option:
-  the two want different things from the same simulation and both are worth
-  keeping.
+- **Whole-team aim control is the default.** You run the side and play the ball
+  with one touch; everyone moves themselves. The two older styles, which give
+  you a single player from a top-down view, are kept as setup options rather
+  than deleted, because they work and they exercise the same simulation.
+- **3D without a 3D library.** The perspective is a look-at basis and a divide
+  by depth in `src/ui/camera.js`, painted back-to-front on the same 2D canvas.
+  Pulling in Three.js would look better but would add a CDN dependency to a game
+  whose whole point is that it opens instantly over your own Wi-Fi with nothing
+  installed.
+- **The camera runs on rails down the pitch.** It tracks the ball sideways only
+  partially and its axis stays nearly parallel to the touchlines, so the pitch
+  does not swing about as the ball moves. The parameters were picked by a search
+  that required the ball to stay on screen from every point on the pitch at four
+  screen sizes; `test/camera.test.js` checks that it still does.
+- **One kick covers passing and shooting.** The ball goes where it is aimed at
+  the power it was hit, which is what makes a single touch enough to play a
+  whole match.
 - **Decision moments are deliberately rationed** in assisted play. Pausing on
   every touch would be exhausting, so the panel opens on winning the ball,
   entering shooting range, being closed down (at most every 4.5 s) and after 5 s
@@ -262,5 +307,10 @@ bugs:
   stops play immediately.
 - **The goal frame has no collision.** A shot that would hit a post travels
   through it rather than rebounding.
+- **The stadium camera does not show the whole pitch at once.** It follows the
+  ball, which is what a 3D football game does; the original top-down styles
+  still show everything if you want that.
+- **Players are drawn as simple stacked shapes**, not models. There are no
+  assets of any kind in the repository.
 - **A sending-off leaves the team a player short** but the AI does not reshape
   its formation to compensate.

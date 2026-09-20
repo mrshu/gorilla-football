@@ -37,8 +37,18 @@ export function showHowTo(root, onBack) {
   const box = el('div', 'panel scroll');
   box.append(el('h2', null, 'How to play'));
   box.append(el('div', 'body', `
-    <p>You are one outfield player, marked with a ring. Goalkeepers and everyone else are run by the computer.</p>
-    <h4>Manual control (default)</h4>
+    <h4>Whole team (default)</h4>
+    <p>You run the whole side from a stadium camera. Every footballer moves themselves; your job is the ball.</p>
+    <ul>
+      <li><b>Hold anywhere</b> on your half of the screen to aim. A guide shows where the ball will go.</li>
+      <li><b>Drag further</b> for more power. A short drag is a gentle pass along the grass, a long one is a driven shot.</li>
+      <li><b>Release</b> to play it. There is no separate pass and shoot: the ball goes exactly where you aimed, as hard as you hit it.</li>
+      <li><b>Tap</b> without dragging while the other side has the ball to close them down.</li>
+    </ul>
+    <p>The player on the ball is ringed. If you leave them alone too long they will play it themselves, so the match never stalls.</p>
+    <p>Restarts work the same way: aim and release to take the throw, corner, free kick or penalty.</p>
+    <h4>One player</h4>
+    <p>The older control styles are still here if you prefer them. Both give you a single outfield player, marked with a ring, seen from straight above.</p>
     <p>You drive your player yourself with the joystick on your side of the screen. Touch anywhere in the joystick zone to put the stick under your thumb. Nothing ever pauses.</p>
     <ul>
       <li><b>PASS</b> — with the ball: pass to whoever you are aiming at. Without it: tackle.</li>
@@ -46,7 +56,7 @@ export function showHowTo(root, onBack) {
       <li><b>SPECIAL</b> — your character's signature move.</li>
     </ul>
     <p>At a restart the taker aims with the joystick and presses PASS or SHOOT; wait too long and they play it automatically.</p>
-    <h4>Assisted control</h4>
+    <h4>One player, paced</h4>
     <p>Your player runs themselves, like every other footballer on the pitch. The match <b>freezes</b> whenever you have a real choice: when you win the ball, when you reach shooting range, when an opponent closes you down, and at every restart you take.</p>
     <p>A panel then offers your options. Passes show the teammate, the distance and whether they are free, and the lines on the pitch show where each ball would go.</p>
     <ul>

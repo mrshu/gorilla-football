@@ -2,11 +2,14 @@
 // -timestep game loop and the wiring between input, match and renderer.
 
 import { Match } from '../game/match.js';
-import { normalizeConfig, defaultConfig, humanCount, MODES } from '../game/config.js';
+import { normalizeConfig, defaultConfig, humanCount, MODES, CONTROL } from '../game/config.js';
 import { PHYSICS, STATES } from '../game/constants.js';
-import { computeLayout } from './layout.js';
+import { computeLayout, computeAimLayout } from './layout.js';
 import { Renderer } from './renderer.js';
+import { Renderer3D } from './renderer3d.js';
 import { InputManager } from './input.js';
+import { AimInput } from './aiminput.js';
+import { drawHud } from './hud.js';
 import { showMenu, showHowTo, showSetup, showPause, showHalftime, showFullTime, showDecision } from './screens.js';
 
 const SCREEN = { MENU: 'menu', HOWTO: 'howto', SETUP: 'setup', MATCH: 'match', DECISION: 'decision', PAUSE: 'pause', HALFTIME: 'halftime', FULLTIME: 'fulltime' };
@@ -17,7 +20,9 @@ export class App {
     this.canvas = canvas;
     this.overlay = overlay;
     this.renderer = new Renderer(canvas);
+    this.renderer3d = new Renderer3D(canvas);
     this.input = new InputManager(canvas);
+    this.aimInput = new AimInput(canvas);
     this.match = null;
     this.setupState = loadSetup();
     this.screen = SCREEN.MENU;
@@ -46,9 +51,28 @@ export class App {
 
   updateLayout() {
     const mode = this.match ? this.match.config.mode : this.setupState.mode;
+    const control = this.match ? this.match.config.control : this.setupState.control;
     const humans = this.match ? this.match.humanInputs.length : humanCount(mode);
+    if (control === CONTROL.AIM) {
+      this.layout = computeAimLayout(this.cssSize.w, this.cssSize.h, humans, this.viewAttackDir());
+      this.renderer3d.camera.setViewport(this.layout.w, this.layout.h);
+      if (this.match) this.renderer3d.updateCamera(this.match, this.layout, 1);
+      this.aimInput.configure({ zones: this.layout.zones, pauseButton: this.layout.pauseBtn, camera: this.renderer3d.camera });
+      return;
+    }
     this.layout = computeLayout(this.cssSize.w, this.cssSize.h, humans, mode === MODES.COOP);
     this.input.setLayout(this.layout);
+  }
+
+  // The camera looks towards the goal the first human's team is attacking.
+  viewAttackDir() {
+    if (!this.match) return 1;
+    const team = this.match.config.humans[0]?.team ?? 0;
+    return this.match.teams[team].attackDir;
+  }
+
+  get isAim() {
+    return Boolean(this.match && this.match.aimControl);
   }
 
   // --------------------------------------------------------- screens
@@ -83,7 +107,10 @@ export class App {
     this.match = new Match(cfg);
     this.updateLayout();
     this.input.reset();
+    this.aimInput.reset();
     this.renderer.floats = [];
+    this.renderer3d.floats = [];
+    this.renderer3d.resetCamera(this.match, this.layout);
     this.overlay.hidden = true;
     this.overlay.innerHTML = '';
     this.screen = SCREEN.MATCH;
@@ -144,9 +171,10 @@ export class App {
     this.lastTs = ts;
 
     if (this.screen === SCREEN.MATCH) {
-      if (this.input.takePause()) {
+      if (this.takePause()) {
         this.pause();
       } else {
+        if (this.isAim) this.feedAimInput();
         this.tickMatch(dtReal);
         if (this.match && this.match.pendingDecision) this.openDecision();
       }
@@ -159,8 +187,29 @@ export class App {
     if (this.match) this.render(dtReal);
   }
 
+  takePause() {
+    return this.isAim ? this.aimInput.takePause() : this.input.takePause();
+  }
+
+  // Turn finished drags into kicks and taps into presses.
+  feedAimInput() {
+    const m = this.match;
+    this.aimInput.configure({ camera: this.renderer3d.camera });
+    for (const r of this.aimInput.drainReleases()) {
+      if (r.tap) {
+        if (!m.canKick(r.human)) m.press(r.human);
+        continue;
+      }
+      if (!m.aimKick(r.human, r.dir, r.power)) m.press(r.human);
+    }
+  }
+
   tickMatch(dtReal) {
     const m = this.match;
+    if (this.isAim) {
+      this.stepMatch(dtReal);
+      return;
+    }
     // Feed input
     for (let i = 0; i < m.humanInputs.length; i++) {
       const r = this.input.readHuman(i);
@@ -168,6 +217,11 @@ export class App {
     }
     this.input.endFrame();
 
+    this.stepMatch(dtReal);
+  }
+
+  stepMatch(dtReal) {
+    const m = this.match;
     this.accumulator += dtReal;
     let steps = 0;
     while (this.accumulator >= PHYSICS.dt && steps < 6) {
@@ -192,32 +246,36 @@ export class App {
     }
   }
 
+  get activeRenderer() {
+    return this.isAim ? this.renderer3d : this.renderer;
+  }
+
   handleEvents(events) {
     const m = this.match;
     for (const e of events) {
       switch (e.type) {
         case 'goal': {
           const t = m.teams[e.team];
-          this.renderer.addFloat('GOAL!', m.ball.pos, t.jersey.primary);
+          this.activeRenderer.addFloat('GOAL!', m.ball.pos, t.jersey.primary);
           vibrate([40, 60, 120]);
           break;
         }
         case 'special':
-          this.renderer.addFloat(e.text, m.getPlayer(e.playerId).pos, '#ffd54f');
+          this.activeRenderer.addFloat(e.text, m.getPlayer(e.playerId).pos, '#ffd54f');
           vibrate(30);
           break;
         case 'card':
-          this.renderer.addFloat(e.card === 'red' ? 'RED CARD' : 'YELLOW', m.getPlayer(e.playerId).pos, e.card === 'red' ? '#ff5252' : '#ffd600');
+          this.activeRenderer.addFloat(e.card === 'red' ? 'RED CARD' : 'YELLOW', m.getPlayer(e.playerId).pos, e.card === 'red' ? '#ff5252' : '#ffd600');
           vibrate(e.card === 'red' ? [30, 40, 30] : 20);
           break;
         case 'offside':
-          this.renderer.addFloat('OFFSIDE', m.getPlayer(e.playerId).pos, '#fff');
+          this.activeRenderer.addFloat('OFFSIDE', m.getPlayer(e.playerId).pos, '#fff');
           break;
         case 'foul':
-          this.renderer.addFloat('FOUL', m.getPlayer(e.victimId).pos, '#ffab91');
+          this.activeRenderer.addFloat('FOUL', m.getPlayer(e.victimId).pos, '#ffab91');
           break;
         case 'save':
-          this.renderer.addFloat('SAVE', m.getPlayer(e.playerId).pos, '#b3e5fc');
+          this.activeRenderer.addFloat('SAVE', m.getPlayer(e.playerId).pos, '#b3e5fc');
           break;
         case 'tackle':
           if (e.result === 'won') vibrate(12);
@@ -229,12 +287,45 @@ export class App {
   }
 
   render(dtReal) {
+    if (this.isAim) {
+      this.layout.viewAttackDir = this.viewAttackDir();
+      const controlledIds = new Set();
+      const aims = [];
+      for (let i = 0; i < this.match.humanInputs.length; i++) {
+        const active = this.match.activePlayerFor(i);
+        if (active) controlledIds.add(active.id);
+        const state = this.aimInput.aimState(i);
+        if (state && state.active && this.match.canKick(i)) {
+          aims.push({ ...state, from: this.match.ball.pos, colour: i === 0 ? '#ffe600' : '#00e5ff' });
+        }
+      }
+      this.renderer3d.draw(this.match, this.layout, {
+        dt: this.screen === SCREEN.MATCH ? dtReal : 0,
+        controlledIds,
+        controlColours: ['#ffe600', '#00e5ff'],
+        aim: aims[0] || null,
+      });
+      drawHud(this.renderer3d.ctx, this.match, this.layout, { hint: this.aimHint() });
+      return;
+    }
     this.renderer.draw(this.match, this.layout, {
       dt: this.screen === SCREEN.DECISION ? 0 : dtReal,
       sticks: this.input.sticks,
       pressed: this.input.pressed,
       decision: this.screen === SCREEN.DECISION ? this.match.pendingDecision : null,
     });
+  }
+
+  // One short line telling the player what their touch will do right now.
+  aimHint() {
+    const m = this.match;
+    if (m.state === STATES.GOAL) return null;
+    if (m.canKick(0)) {
+      return m.state === STATES.PLAY ? 'Hold to aim · release to play it' : 'Hold to aim the restart';
+    }
+    const owner = m.ball.owner !== null ? m.getPlayer(m.ball.owner) : null;
+    if (owner && owner.team !== (m.config.humans[0]?.team ?? 0)) return 'Tap to close them down';
+    return null;
   }
 }
 

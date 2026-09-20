@@ -37,6 +37,36 @@ function buttonCluster(cx, cy, br, flip, bounds) {
 
 // `sameSide` is true when both humans play on the same team (co-op). They then
 // both face the screen the same way up instead of sitting at opposite ends.
+// Whole-team play needs no on-screen controls at all: the whole canvas is the
+// control. Two humans split it so each has their own touch area.
+export function computeAimLayout(w, h, humanCount, viewAttackDir) {
+  const portrait = h > w;
+  const hud = { x: 0, y: 0, w, h: HUD_H };
+  const zones = humanCount < 2
+    ? [{ x: 0, y: HUD_H, w, h: h - HUD_H }]
+    : portrait
+      ? [
+          { x: 0, y: HUD_H + (h - HUD_H) / 2, w, h: (h - HUD_H) / 2 },
+          { x: 0, y: HUD_H, w, h: (h - HUD_H) / 2 },
+        ]
+      : [
+          { x: 0, y: HUD_H, w: w / 2, h: h - HUD_H },
+          { x: w / 2, y: HUD_H, w: w / 2, h: h - HUD_H },
+        ];
+  return {
+    w,
+    h,
+    portrait,
+    humanCount,
+    aim: true,
+    viewAttackDir,
+    zones,
+    hud,
+    controls: [],
+    pauseBtn: { cx: w - 20, cy: hud.y + HUD_H / 2, r: 15 },
+  };
+}
+
 export function computeLayout(w, h, humanCount, sameSide = false) {
   const portrait = h > w;
   const layout = { w, h, portrait, humanCount, sameSide, controls: [], hud: { x: 0, y: 0, w, h: HUD_H } };
