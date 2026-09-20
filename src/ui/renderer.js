@@ -124,11 +124,49 @@ export class Renderer {
       ctx.ellipse(sp.x, sp.y + s * 0.25, s * 0.55 * p.character.look.size, s * 0.3 * p.character.look.size, 0, 0, Math.PI * 2);
       ctx.fill();
     }
+    if (opts.decision) this.drawDecisionCues(ctx, match, layout, opts.decision);
     for (const p of match.players) {
       if (p.sentOff) continue;
       this.drawPlayer(ctx, p, layout, opts);
     }
     this.drawBall(ctx, match, layout);
+  }
+
+
+  // While the match is frozen for a decision, show where each pass would go
+  // and where a shot would be aimed, so the choice is readable on the pitch.
+  drawDecisionCues(ctx, match, layout, decision) {
+    const s = layout.pitch.scale;
+    const from = layout.worldToScreen(match.getPlayer(decision.playerId).pos);
+    const colour = decision.humanIndex === 0 ? 'rgba(255,230,0,' : 'rgba(0,229,255,';
+    ctx.save();
+    ctx.lineWidth = Math.max(2, s * 0.14);
+    for (const o of decision.options) {
+      if (o.id === 'pass') {
+        const to = layout.worldToScreen(match.getPlayer(o.targetId).pos);
+        ctx.strokeStyle = colour + (o.quality === 'good' ? '0.85)' : o.quality === 'poor' ? '0.3)' : '0.6)');
+        ctx.setLineDash([Math.max(5, s * 0.5), Math.max(4, s * 0.4)]);
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = colour + '0.9)';
+        ctx.beginPath();
+        ctx.arc(to.x, to.y, s * 0.9, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (o.id === 'shoot') {
+        const goal = layout.worldToScreen(match.goalTargetFor(match.getPlayer(decision.playerId)));
+        ctx.strokeStyle = 'rgba(255,120,60,0.7)';
+        ctx.setLineDash([Math.max(7, s * 0.7), Math.max(4, s * 0.4)]);
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(goal.x, goal.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+    ctx.restore();
   }
 
   drawPlayer(ctx, p, layout, opts) {
@@ -411,6 +449,7 @@ export class Renderer {
   drawControls(ctx, layout, opts) {
     const sticks = opts.sticks || [];
     ctx.save();
+    if (opts.decision) ctx.globalAlpha = 0.25;
     layout.controls.forEach((c, i) => {
       const col = i === 0 ? 'rgba(255,230,0,' : 'rgba(0,229,255,';
       const j = c.joystick;
@@ -463,6 +502,7 @@ export class Renderer {
         sub = `${match.teams[sp.team].name}${taker.human !== null ? ` — P${taker.human + 1}: aim + PASS/SHOOT` : ''}`;
       }
     }
+    if (opts.decision) return;
     if (opts.bannerOverride) {
       text = opts.bannerOverride.text;
       sub = opts.bannerOverride.sub;

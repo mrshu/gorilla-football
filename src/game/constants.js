@@ -64,4 +64,12 @@ export const SET_PIECES = Object.freeze({
   PENALTY: 'penalty',
 });
 
+// Assisted-control decision pauses.
+export const DECISION = Object.freeze({
+  passOptions: 3, // how many pass targets the panel offers
+  pressureDistance: 2.6, // an opponent this close counts as pressure
+  pressureGap: 4.5, // seconds before pressure can re-open the panel
+  carryGap: 5, // seconds of uninterrupted carrying before asking again
+});
+
 export const ROLES = Object.freeze({ GK: 'GK', DF: 'DF', MF: 'MF', FW: 'FW' });

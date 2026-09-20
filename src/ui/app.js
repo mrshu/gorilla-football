@@ -7,9 +7,9 @@ import { PHYSICS, STATES } from '../game/constants.js';
 import { computeLayout } from './layout.js';
 import { Renderer } from './renderer.js';
 import { InputManager } from './input.js';
-import { showMenu, showHowTo, showSetup, showPause, showHalftime, showFullTime } from './screens.js';
+import { showMenu, showHowTo, showSetup, showPause, showHalftime, showFullTime, showDecision } from './screens.js';
 
-const SCREEN = { MENU: 'menu', HOWTO: 'howto', SETUP: 'setup', MATCH: 'match', PAUSE: 'pause', HALFTIME: 'halftime', FULLTIME: 'fulltime' };
+const SCREEN = { MENU: 'menu', HOWTO: 'howto', SETUP: 'setup', MATCH: 'match', DECISION: 'decision', PAUSE: 'pause', HALFTIME: 'halftime', FULLTIME: 'fulltime' };
 const STORE_KEY = 'gorilla-football/setup';
 
 export class App {
@@ -91,8 +91,34 @@ export class App {
     this.lastTs = 0;
   }
 
+  // The match is frozen by the simulation; show the choices.
+  openDecision() {
+    const d = this.match.pendingDecision;
+    if (!d) return;
+    this.screen = SCREEN.DECISION;
+    // In portrait versus the second player sits at the far end of the device.
+    const flip = d.humanIndex === 1 && this.layout.portrait && !this.layout.sameSide;
+    showDecision(this.overlay, this.match, d, {
+      flip,
+      onChoose: (choice) => {
+        if (!this.match.resolveDecision(choice)) return;
+        this.handleEvents(this.match.drainEvents());
+        this.closeDecision();
+      },
+    });
+  }
+
+  closeDecision() {
+    this.overlay.hidden = true;
+    this.overlay.innerHTML = '';
+    this.screen = SCREEN.MATCH;
+    this.input.reset();
+    this.lastTs = 0;
+    this.accumulator = 0;
+  }
+
   pause() {
-    if (this.screen !== SCREEN.MATCH) return;
+    if (this.screen !== SCREEN.MATCH && this.screen !== SCREEN.DECISION) return;
     this.screen = SCREEN.PAUSE;
     showPause(this.overlay, this.match, {
       onResume: () => this.resumeMatch(),
@@ -107,6 +133,7 @@ export class App {
     this.screen = SCREEN.MATCH;
     this.input.reset();
     this.lastTs = 0;
+    if (this.match && this.match.pendingDecision) this.openDecision();
   }
 
   // ------------------------------------------------------------ loop
@@ -121,7 +148,13 @@ export class App {
         this.pause();
       } else {
         this.tickMatch(dtReal);
+        if (this.match && this.match.pendingDecision) this.openDecision();
       }
+    } else if (this.screen === SCREEN.DECISION) {
+      if (this.input.takePause()) this.pause();
+      // If the decision went away by any route other than the panel, do not
+      // strand the player on a frozen screen.
+      else if (!this.match || !this.match.pendingDecision) this.closeDecision();
     }
     if (this.match) this.render(dtReal);
   }
@@ -197,9 +230,10 @@ export class App {
 
   render(dtReal) {
     this.renderer.draw(this.match, this.layout, {
-      dt: dtReal,
+      dt: this.screen === SCREEN.DECISION ? 0 : dtReal,
       sticks: this.input.sticks,
       pressed: this.input.pressed,
+      decision: this.screen === SCREEN.DECISION ? this.match.pendingDecision : null,
     });
   }
 }

@@ -4,8 +4,10 @@ import { Match } from '../src/game/match.js';
 import { normalizeConfig, MODES } from '../src/game/config.js';
 import { PHYSICS, STATES, SET_PIECES, PITCH } from '../src/game/constants.js';
 
+// These tests cover the manual control path; the assisted path (AI-driven
+// human player plus decision pauses) is covered in assist.test.js.
 function makeMatch(over = {}) {
-  const cfg = normalizeConfig({ mode: MODES.SOLO, durationMinutes: 2, seed: 99, humans: [{ characterId: 'gorilla' }], ...over });
+  const cfg = normalizeConfig({ mode: MODES.SOLO, control: 'manual', durationMinutes: 2, seed: 99, humans: [{ characterId: 'gorilla' }], ...over });
   return new Match(cfg);
 }
 

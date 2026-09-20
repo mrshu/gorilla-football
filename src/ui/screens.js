@@ -5,7 +5,7 @@
 import { CHARACTERS, STAT_KEYS, getCharacter } from '../data/characters.js';
 import { TEAM_PRESETS } from '../data/teams.js';
 import { JERSEYS, jerseysDistinct } from '../data/jerseys.js';
-import { MODES, MODE_INFO, DURATION_OPTIONS, humanCount, humanTeamIndex } from '../game/config.js';
+import { MODES, MODE_INFO, CONTROL, CONTROL_INFO, DURATION_OPTIONS, humanCount, humanTeamIndex } from '../game/config.js';
 import { getAbility } from '../game/abilities.js';
 
 const el = (tag, cls, html) => {
@@ -37,16 +37,27 @@ export function showHowTo(root, onBack) {
   const box = el('div', 'panel scroll');
   box.append(el('h2', null, 'How to play'));
   box.append(el('div', 'body', `
-    <p><b>Move</b> with the joystick on your side of the screen. Everything else is a button:</p>
+    <p>You are one outfield player, marked with a ring. Goalkeepers and everyone else are run by the computer.</p>
+    <h4>Assisted control (default)</h4>
+    <p>Your player runs themselves, like every other footballer on the pitch. The match <b>freezes</b> whenever you have a real choice: when you win the ball, when you reach shooting range, when an opponent closes you down, and at every restart you take.</p>
+    <p>A panel then offers your options. Passes show the teammate, the distance and whether they are free, and the lines on the pitch show where each ball would go.</p>
     <ul>
-      <li><b>PASS</b> — with the ball: pass to the teammate you are aiming at. Without it: tackle.</li>
-      <li><b>SHOOT</b> — with the ball: shoot (aim up/down to place it). Without it: slide tackle.</li>
+      <li><b>SHOOT</b> — have a go at goal.</li>
+      <li><b>PASS #n</b> — play it to that teammate.</li>
       <li><b>SPECIAL</b> — your character's signature move.</li>
+      <li><b>DRIBBLE</b> — carry on and decide a moment later.</li>
     </ul>
-    <p>At a restart the taker aims with the joystick and presses PASS or SHOOT. Wait too long and they play it automatically.</p>
-    <p>You control one outfield player, marked with a ring. Goalkeepers and everyone else are AI.</p>
+    <p>Between decisions you can still steer with the joystick and use the buttons whenever you like. Nothing forces you to wait for the panel.</p>
+    <h4>Manual control</h4>
+    <p>Choose it in the setup screen if you would rather drive everything yourself and never pause:</p>
+    <ul>
+      <li><b>PASS</b> — with the ball: pass to whoever you are aiming at. Without it: tackle.</li>
+      <li><b>SHOOT</b> — with the ball: shoot, aiming up or down to place it. Without it: slide tackle.</li>
+      <li><b>SPECIAL</b> — your signature move.</li>
+    </ul>
+    <p>At a restart the taker aims with the joystick and presses PASS or SHOOT; wait too long and they play it automatically.</p>
     <p><b>Keyboard (desktop):</b> P1 = WASD + J / K / L. P2 = arrow keys + 1 / 2 / 3. Esc pauses.</p>
-    <p>Two-player matches use two separate control clusters so two people can hold the same device.</p>
+    <p>Two-player matches give each person their own joystick and buttons so two people can hold the same device.</p>
   `));
   const back = el('button', 'btn', 'Back');
   back.onclick = onBack;
@@ -73,6 +84,9 @@ export function showSetup(root, initial, { onStart, onBack }) {
 
     // Teams + jerseys
     for (let t = 0; t < 2; t++) box.append(section(`Team ${t + 1}${humanTeams().includes(t) ? ' (you)' : ' (AI)'}`, teamRow(t)));
+
+    // Control style
+    box.append(section('Control style', controlRow()));
 
     // Duration
     box.append(section('Match length', durationRow()));
@@ -190,6 +204,23 @@ export function showSetup(root, initial, { onStart, onBack }) {
     return wrap;
   }
 
+  function controlRow() {
+    const wrap = el('div');
+    const row = el('div', 'chips');
+    for (const c of CONTROL_INFO) {
+      const b = el('button', 'chip' + (state.control === c.id ? ' on' : ''), c.name);
+      b.onclick = () => {
+        state.control = c.id;
+        render();
+      };
+      row.append(b);
+    }
+    wrap.append(row);
+    const info = CONTROL_INFO.find((c) => c.id === state.control) || CONTROL_INFO[0];
+    wrap.append(el('p', 'foot', info.detail));
+    return wrap;
+  }
+
   function durationRow() {
     const row = el('div', 'chips');
     for (const d of DURATION_OPTIONS) {
@@ -204,6 +235,53 @@ export function showSetup(root, initial, { onStart, onBack }) {
   }
 
   render();
+}
+
+
+// The frozen decision panel. `flip` rotates it for a player sitting at the
+// far end of the device in two-player portrait versus.
+export function showDecision(root, match, decision, { onChoose, flip = false }) {
+  root.innerHTML = '';
+  root.className = 'overlay decision';
+  const player = match.getPlayer(decision.playerId);
+  const sheet = el('div', `sheet p${decision.humanIndex + 1}${flip ? ' flip' : ''}`);
+
+  const head = el('div', 'dhead');
+  head.append(el('span', 'who', `P${decision.humanIndex + 1} · #${player.number} ${player.character.name}`));
+  head.append(el('span', 'why', triggerLabel(decision)));
+  sheet.append(head);
+
+  const grid = el('div', 'dopts');
+  for (const o of decision.options) {
+    const b = el('button', `dopt q-${o.quality || 'ok'}${o.disabled ? ' off' : ''}`);
+    b.append(el('span', 'dlabel', o.label));
+    b.append(el('span', 'ddetail', o.detail || ''));
+    b.disabled = Boolean(o.disabled);
+    if (!o.disabled) b.onclick = () => onChoose({ id: o.id, targetId: o.targetId });
+    grid.append(b);
+  }
+  sheet.append(grid);
+  root.append(sheet);
+  root.hidden = false;
+}
+
+function triggerLabel(d) {
+  if (d.setPieceKind) {
+    return {
+      kickoff: 'Kick-off',
+      throw_in: 'Throw-in',
+      corner: 'Corner',
+      goal_kick: 'Goal kick',
+      free_kick: 'Free kick',
+      penalty: 'Penalty',
+    }[d.setPieceKind] || 'Restart';
+  }
+  return {
+    possession: 'You won the ball',
+    shooting_range: 'In shooting range',
+    pressure: 'Under pressure',
+    carrying: 'On the ball',
+  }[d.trigger] || 'Your call';
 }
 
 export function showPause(root, match, { onResume, onRestart, onQuit }) {

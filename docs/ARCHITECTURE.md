@@ -65,6 +65,11 @@ events, mutating players).
 Deterministic utility scoring over a handful of situations, as specified — no
 learning, no pathfinding graphs.
 
+In assisted play the AI is also nudged to keep the human involved: a human
+receiver scores a bonus in `rankPassTargets()`, and `looseBall()` lets them
+contest one more loose ball than a teammate would. Without that the person
+holding the phone saw the ball for about a tenth of the match.
+
 **Outfield** (`src/game/ai.js`) — each frame a player is in exactly one of four
 situations:
 
@@ -80,6 +85,44 @@ at a depth that increases as the ball approaches, projects incoming shots to its
 own line and moves to intercept after a reaction delay, collects loose balls
 inside its box, holds briefly, then distributes to the best-scoring open
 teammate or clears long.
+
+## Assisted control and decision pauses
+
+By default a human's footballer is driven by the same AI as everyone else, and
+the match freezes when they have a choice to make. Three pieces make that work.
+
+**Movement.** `controlAssistedHuman()` runs the normal AI to set the player's
+desired velocity, then lets the joystick override it while it is pushed. The
+buttons stay live, so a confident player never has to wait for the panel.
+
+**Suppressed auto-action.** `carryBall()` in the AI checks `match.isAssisted()`
+and, for a human's player, skips the block that decides to shoot or pass. The
+player still dribbles, steers around opponents and avoids the touchlines; only
+the decision is withheld.
+
+**The freeze.** `step()` returns immediately while `match.pendingDecision` is
+set, so the clock, the ball and every player stop dead. `maybeOpenDecision()`
+runs at the end of each played frame and opens the panel on one of four
+triggers:
+
+| Trigger | Fires when |
+| --- | --- |
+| `possession` | the human's player becomes the ball owner |
+| `shooting_range` | they carry it inside their shooting range, once per possession |
+| `pressure` | an opponent comes within `DECISION.pressureDistance`, at most every `pressureGap` seconds |
+| `carrying` | `carryGap` seconds pass without any other trigger |
+
+Restarts use the same panel: `stepSetPiece()` calls `openDecision()` with the
+set-piece kind instead of waiting for a button, and the restart stays staged
+until the choice comes back.
+
+`buildDecisionOptions()` produces the options as plain data — an id, a label, a
+detail line and a `quality` hint — so the UI renders them without knowing any
+football. `resolveDecision()` validates the choice against that list, rejecting
+anything disabled or unknown, applies it and unfreezes.
+
+The thresholds live in `DECISION` in `constants.js`. They are tuned so a
+five-minute match produces roughly one decision every five seconds of play.
 
 ## Abilities
 

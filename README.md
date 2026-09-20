@@ -4,9 +4,15 @@ A mobile-first, top-down 11-a-side arcade football game for one or two players
 on a single phone or tablet. Plain HTML5 canvas and ES modules, no build step,
 no dependencies, no network calls.
 
+Your footballer runs themselves, like the other twenty-one on the pitch. The
+match freezes when you have a real choice to make and asks what you want to do:
+shoot, pass to a named teammate, fire your special, or carry on dribbling. If
+you would rather drive everything yourself, manual control is one tap away on
+the setup screen.
+
 ![A match in landscape](docs/screenshots/match.png)
 
-<img src="docs/screenshots/setup.png" width="240" alt="Pre-match setup"> <img src="docs/screenshots/coop-portrait.png" width="240" alt="Two-player co-op in portrait">
+<img src="docs/screenshots/decision.png" width="240" alt="The decision panel, with pass lines drawn on the pitch"> <img src="docs/screenshots/setup.png" width="240" alt="Pre-match setup"> <img src="docs/screenshots/coop-portrait.png" width="240" alt="Two-player co-op in portrait">
 
 ## Run it
 
@@ -153,10 +159,17 @@ scripts/simulate.js     headless match simulator
 npm test
 ```
 
-Forty tests covering out-of-play classification, offside in both directions,
-tackle and card resolution, penalties, match flow (halves, side switching,
-kickoff after a goal), the Gorilla's ten guaranteed goals, sending-off and
-control handover, config validation, and simulation determinism.
+Sixty-two tests covering out-of-play classification, offside in both
+directions, tackle and card resolution, penalties, match flow (halves, side
+switching, kickoff after a goal), the Gorilla's ten guaranteed goals,
+sending-off and control handover, config validation, simulation determinism,
+and control layout at eight screen sizes.
+
+Assisted control has its own suite: that the human's player moves with no input
+while a manual one does not, that the clock, ball and all twenty-two players are
+frozen while a decision is open, that each option does what it says, that a
+disabled option cannot be taken, that dribbling reopens the panel, and that a
+full assisted match reaches full time.
 
 ## Design decisions
 

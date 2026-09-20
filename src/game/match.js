@@ -2,7 +2,7 @@
 // rules and match flow with a fixed time step. UI code reads state and
 // drains `events`; controllers push human input via setHumanInput().
 
-import { PITCH, PHYSICS, TIMING, STATES, SET_PIECES, ROLES } from './constants.js';
+import { PITCH, PHYSICS, TIMING, STATES, SET_PIECES, ROLES, DECISION } from './constants.js';
 import { add, sub, scale, norm, len, dist, clamp, dot, clampLen, lerp, fromAngle, angle } from './vec.js';
 import { createRng } from './rng.js';
 import { createTeam, createPlayer, createBall, slotWorldPos, relToWorld, goalCenter } from './entities.js';
@@ -27,6 +27,11 @@ export class Match {
     this.kickoffTeam = 0;
     this.offsideKicker = null;
     this.humanInputs = config.humans.map(() => ({ move: { x: 0, y: 0 }, pass: false, shoot: false, special: false }));
+    // Assisted play: the AI runs the human's footballer and the match freezes
+    // whenever they have a choice worth making.
+    this.assist = Boolean(config.assist);
+    this.pendingDecision = null;
+    this.decisionCarry = null;
     this.stats = { shots: [0, 0], fouls: [0, 0], offsides: [0, 0], saves: [0, 0], specials: [0, 0] };
     this.cards = []; // {playerId, team, card, minute}
     this.goals = []; // {team, scorerId, half, time}
@@ -126,6 +131,9 @@ export class Match {
 
   step(dt = PHYSICS.dt) {
     if (this.state === STATES.HALFTIME || this.state === STATES.FULLTIME) return;
+    // A pending decision freezes everything: the clock, the ball and all 22
+    // players. Nothing advances until resolveDecision() is called.
+    if (this.pendingDecision) return;
     this.time += dt;
     this.tickTimers(dt);
 
@@ -186,6 +194,7 @@ export class Match {
   beginSetPiece({ kind, team, pos }) {
     this.lastSetPieceKind = kind;
     this.clearOffsideFlags();
+    this.decisionCarry = null;
     const ball = this.ball;
     ball.owner = null;
     ball.homing = null;
@@ -347,6 +356,11 @@ export class Match {
     const humanIdx = taker.human;
     const waited = sp.timer - lerpDur;
     if (humanIdx !== null && humanIdx !== undefined) {
+      if (this.assist) {
+        // Assisted play: freeze and ask, instead of waiting for a button.
+        this.openDecision(taker, 'set_piece', sp.kind);
+        return;
+      }
       const inp = this.humanInputs[humanIdx];
       const mv = inp.move;
       if (len(mv) > 0.2) {
@@ -367,7 +381,7 @@ export class Match {
     if (waited > TIMING.setPieceAiDelay) this.takeSetPiece(taker, 'auto', null);
   }
 
-  takeSetPiece(taker, mode, aim) {
+  takeSetPiece(taker, mode, aim, { target: explicitTarget = null } = {}) {
     const sp = this.setPiece;
     const kind = sp.kind;
     this.state = STATES.PLAY;
@@ -387,7 +401,7 @@ export class Match {
       const aimY = aim ? clamp(aim.y, -1, 1) : this.rng.range(-0.7, 0.7);
       this.shoot(taker, aimY, { noOffside: exempt, force: true });
     } else {
-      const target = this.choosePassTarget(taker, aim, { setPiece: kind });
+      const target = explicitTarget || this.choosePassTarget(taker, aim, { setPiece: kind });
       if (target) this.passTo(taker, target, { noOffside: exempt, loft: kind === SET_PIECES.CORNER || kind === SET_PIECES.GOAL_KICK });
       else {
         const dir = aim || { x: this.teams[taker.team].attackDir, y: 0 };
@@ -408,11 +422,14 @@ export class Match {
     }
 
     // Controllers
+    const prevOwner = this.ball.owner;
     const ballOwner = this.ball.owner !== null ? this.getPlayer(this.ball.owner) : null;
     this.frameCache = this.buildFrameCache(ballOwner);
     for (const p of this.players) {
       if (p.sentOff) continue;
-      if (p.human !== null && this.humanInputs[p.human]) this.controlHuman(p, this.humanInputs[p.human], dt);
+      const input = p.human !== null ? this.humanInputs[p.human] : null;
+      if (input && !this.assist) this.controlHuman(p, input, dt);
+      else if (input) this.controlAssistedHuman(p, input, dt);
       else if (p.isGK) updateGoalkeeper(this, p, dt);
       else updateOutfieldAI(this, p, dt);
     }
@@ -427,6 +444,8 @@ export class Match {
     this.integrateBall(dt);
     if (this.state !== STATES.PLAY) return;
     this.checkOutOfPlay();
+    if (this.state !== STATES.PLAY) return;
+    this.maybeOpenDecision(prevOwner);
   }
 
   buildFrameCache(ballOwner) {
@@ -460,6 +479,36 @@ export class Match {
     }
     if (input.shoot) {
       if (hasBall) this.shoot(p, mag > 0.15 ? mv.y * 0.9 : 0, {});
+      else this.startSlide(p);
+    }
+  }
+
+  // Assisted controller: the AI drives the player, the joystick overrides
+  // steering while it is pushed, and the buttons still work as live shortcuts
+  // so an experienced player is never forced to wait for the panel.
+  controlAssistedHuman(p, input, dt) {
+    if (p.isGK) updateGoalkeeper(this, p, dt);
+    else updateOutfieldAI(this, p, dt);
+
+    const mv = input.move;
+    const mag = Math.min(1, len(mv));
+    if (mag > 0.15) {
+      const maxSpeed = this.effectiveMaxSpeed(p);
+      p.desiredVel = scale(norm(mv), maxSpeed * Math.max(0.4, mag));
+      if (p.sliding <= 0) p.facing = norm(mv);
+    }
+
+    const hasBall = this.ball.owner === p.id;
+    if (input.special) this.tryActivateAbility(p);
+    if (input.pass) {
+      if (hasBall) {
+        const target = this.choosePassTarget(p, mag > 0.15 ? norm(mv) : null, {});
+        if (target) this.passTo(p, target, {});
+        else this.kick(p, p.facing, 18, {});
+      } else this.attemptTackle(p, false);
+    }
+    if (input.shoot) {
+      if (hasBall) this.shoot(p, mag > 0.15 ? mv.y * 0.9 : this.preferredShotAim(p), {});
       else this.startSlide(p);
     }
   }
@@ -806,12 +855,18 @@ export class Match {
   }
 
   // Choose the best pass target. aim: unit vector or null.
-  choosePassTarget(p, aim, { setPiece } = {}) {
+  choosePassTarget(p, aim, opts = {}) {
+    const ranked = this.rankPassTargets(p, aim, opts);
+    return ranked.length ? ranked[0].player : null;
+  }
+
+  // Every legal pass target, best first, with the score that ranked it. The
+  // decision panel shows the top few; the AI just takes the first.
+  rankPassTargets(p, aim, { setPiece } = {}) {
     const team = this.teams[p.team];
     const mates = this.teammatesOf(p).filter((m) => !(m.isGK && setPiece !== SET_PIECES.THROW_IN && !aim));
     const opps = this.opponentsOf(p);
-    let best = null;
-    let bestScore = -Infinity;
+    const ranked = [];
     for (const m of mates) {
       if (m.offsideFlag) continue;
       const to = sub(m.pos, p.pos);
@@ -837,13 +892,168 @@ export class Match {
       score += Math.min(nearOpp, 12) * 0.35 - laneBlocked * 3;
       score -= Math.abs(d - 18) * 0.06;
       if (m.isGK) score -= 4;
+      // In assisted play the human is the protagonist: teammates look for them
+      // a little more often so the human actually gets decisions to make.
+      if (this.isAssisted(m) && p.human === null) score += 2.5;
       if (setPiece === SET_PIECES.KICKOFF) score = -d + (m.role === ROLES.FW || m.role === ROLES.MF ? 5 : 0);
-      if (score > bestScore) {
-        bestScore = score;
-        best = m;
-      }
+      ranked.push({ player: m, score, distance: d, marked: nearOpp, blocked: laneBlocked });
     }
-    return best;
+    ranked.sort((a, b) => b.score - a.score);
+    return ranked;
+  }
+
+
+  // ------------------------------------------------------------- decisions
+  //
+  // In assisted control the human's footballer is driven by the same AI as
+  // everyone else. The match freezes at the moments where a real player would
+  // have a choice, and resumes once that choice is made.
+
+  isAssisted(p) {
+    return this.assist && p && p.human !== null && p.human !== undefined && !p.sentOff;
+  }
+
+  // Decide whether the frozen decision panel should open this frame.
+  // `prevOwner` is the ball owner id at the start of the frame.
+  maybeOpenDecision(prevOwner) {
+    if (!this.assist || this.pendingDecision || this.state !== STATES.PLAY) return;
+    const owner = this.ball.owner !== null ? this.getPlayer(this.ball.owner) : null;
+    if (!owner || !this.isAssisted(owner) || owner.isGK) {
+      this.decisionCarry = null;
+      return;
+    }
+    if (prevOwner !== owner.id || !this.decisionCarry || this.decisionCarry.playerId !== owner.id) {
+      this.decisionCarry = { playerId: owner.id, rangeDone: false, pressureAt: -99, lastOpen: this.time };
+      this.openDecision(owner, 'possession');
+      return;
+    }
+    const c = this.decisionCarry;
+    const dGoal = dist(owner.pos, this.goalTargetFor(owner));
+    const shootRange = 14 + owner.stats.shotPower * 1.3;
+    if (!c.rangeDone && dGoal < shootRange) {
+      c.rangeDone = true;
+      this.openDecision(owner, 'shooting_range');
+      return;
+    }
+    let nearest = Infinity;
+    for (const o of this.opponentsOf(owner)) nearest = Math.min(nearest, dist(o.pos, owner.pos));
+    if (nearest < DECISION.pressureDistance && this.time - c.pressureAt > DECISION.pressureGap) {
+      c.pressureAt = this.time;
+      this.openDecision(owner, 'pressure');
+      return;
+    }
+    if (this.time - c.lastOpen > DECISION.carryGap) this.openDecision(owner, 'carrying');
+  }
+
+  openDecision(p, trigger, setPieceKind = null) {
+    if (this.pendingDecision) return;
+    if (this.decisionCarry && this.decisionCarry.playerId === p.id) this.decisionCarry.lastOpen = this.time;
+    this.pendingDecision = {
+      humanIndex: p.human,
+      playerId: p.id,
+      team: p.team,
+      trigger,
+      setPieceKind,
+      clock: this.clockLabel(),
+      options: this.buildDecisionOptions(p, setPieceKind),
+    };
+    this.emit('decision', { playerId: p.id, humanIndex: p.human, trigger, setPieceKind });
+  }
+
+  // The choices offered in the panel. Ids are stable so the UI stays dumb.
+  buildDecisionOptions(p, setPieceKind) {
+    const options = [];
+    const goal = this.goalTargetFor(p);
+    const dGoal = dist(p.pos, goal);
+    const onTarget = Math.abs(p.pos.y - HALF_W) < 24 || dGoal < 14;
+    options.push({
+      id: 'shoot',
+      label: 'SHOOT',
+      detail: `${Math.round(dGoal)} m out`,
+      quality: dGoal < 18 && onTarget ? 'good' : dGoal < 32 ? 'ok' : 'poor',
+    });
+    const ranked = this.rankPassTargets(p, null, { setPiece: setPieceKind }).slice(0, DECISION.passOptions);
+    for (const r of ranked) {
+      options.push({
+        id: 'pass',
+        targetId: r.player.id,
+        label: `PASS #${r.player.number}`,
+        detail: `${r.player.character.name} · ${Math.round(r.distance)} m${r.blocked ? ' · covered' : r.marked > 7 ? ' · free' : ''}`,
+        quality: r.blocked ? 'poor' : r.marked > 7 ? 'good' : 'ok',
+      });
+    }
+    const ability = getAbility(p.ability.id);
+    const usable = p.ability.cooldown <= 0 && p.ability.usesLeft > 0 && (!ability.needsBall || this.ball.owner === p.id);
+    options.push({
+      id: 'special',
+      label: ability.short || 'SPECIAL',
+      detail: Number.isFinite(p.ability.usesLeft)
+        ? `${ability.name} · ${p.ability.usesLeft} left`
+        : p.ability.cooldown > 0
+          ? `${ability.name} · ${Math.ceil(p.ability.cooldown)} s`
+          : ability.name,
+      disabled: !usable,
+      quality: 'special',
+    });
+    if (!setPieceKind) options.push({ id: 'dribble', label: 'DRIBBLE', detail: 'Carry on and decide later', quality: 'ok' });
+    return options;
+  }
+
+  // Apply the human's choice and unfreeze. Returns true if it was applied.
+  resolveDecision(choice = {}) {
+    const d = this.pendingDecision;
+    if (!d) return false;
+    const p = this.getPlayer(d.playerId);
+    const option = d.options.find((o) => o.id === choice.id && (choice.targetId === undefined || o.targetId === choice.targetId));
+    if (!option || option.disabled) return false;
+    this.pendingDecision = null;
+
+    if (d.setPieceKind) {
+      // The restart is still staged; play it the way the human asked.
+      const target = choice.targetId !== undefined ? this.getPlayer(choice.targetId) : null;
+      if (choice.id === 'special') {
+        // A special at a restart fires immediately, then the restart is taken.
+        this.ball.owner = p.id;
+        this.tryActivateAbility(p);
+        if (this.setPiece) this.takeSetPiece(p, 'auto', null);
+        return true;
+      }
+      this.takeSetPiece(p, choice.id === 'shoot' ? 'shoot' : 'pass', null, { target });
+      return true;
+    }
+
+    switch (choice.id) {
+      case 'shoot':
+        this.shoot(p, this.preferredShotAim(p));
+        break;
+      case 'pass': {
+        const target = this.getPlayer(choice.targetId);
+        if (target) this.passTo(p, target, {});
+        else this.kick(p, p.facing, 18, {});
+        break;
+      }
+      case 'special':
+        this.tryActivateAbility(p);
+        break;
+      case 'dribble':
+      default:
+        break;
+    }
+    if (this.decisionCarry) this.decisionCarry.lastOpen = this.time;
+    return true;
+  }
+
+  // Aim away from where the opposing keeper is standing.
+  preferredShotAim(p) {
+    const gk = this.teams[1 - p.team].players.find((o) => o.isGK && !o.sentOff);
+    if (!gk) return this.rng.range(-0.6, 0.6);
+    return gk.pos.y > HALF_W ? -0.75 : 0.75;
+  }
+
+  // Cancel a pending decision, e.g. because the match was restarted around it.
+  clearDecision() {
+    this.pendingDecision = null;
+    this.decisionCarry = null;
   }
 
   // ------------------------------------------------------------- tackling

@@ -95,8 +95,11 @@ function carryBall(match, p, dt) {
   const dGoal = dist(p.pos, goal);
   const nearOpp = nearestOpponentDistance(match, p);
   const pressure = nearOpp < 2.4;
+  // An assisted human's footballer runs itself but never decides for them:
+  // shooting and passing come from the decision panel instead.
+  const autoAct = !match.isAssisted(p);
 
-  if (p.ai.decisionTimer <= 0) {
+  if (autoAct && p.ai.decisionTimer <= 0) {
     p.ai.decisionTimer = 0.22;
     const shootRange = 14 + p.stats.shotPower * 1.3;
     const wideOk = Math.abs(p.pos.y - HALF_W) < 20 || dGoal < 12;
@@ -227,7 +230,10 @@ function looseBall(match, p) {
   const team = match.teams[p.team];
   const predicted = add(ball.pos, scale(ball.vel, 0.45));
   const rank = outfieldRank(match, p, predicted);
-  if (rank < 2 && !ball.unstoppable) {
+  // An assisted human chases loose balls a little more eagerly than a
+  // teammate would, so the person holding the phone stays involved.
+  const chaseRank = match.isAssisted(p) ? 3 : 2;
+  if (rank < chaseRank && !ball.unstoppable) {
     const target = { x: clamp(predicted.x, 0.5, PITCH.length - 0.5), y: clamp(predicted.y, 0.5, PITCH.width - 0.5) };
     moveTo(match, p, target, 1);
     return;

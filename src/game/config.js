@@ -21,6 +21,17 @@ export const MODE_INFO = [
 export const DURATION_OPTIONS = [1, 2, 3, 5, 8, 10, 15];
 export const DEFAULT_DURATION_MINUTES = 5;
 
+// How a human's footballer is driven.
+//   ASSISTED: the AI runs them like any other player and the match freezes at
+//             decision moments so the human chooses what to do with the ball.
+//   MANUAL:   the human drives them entirely with the joystick and buttons.
+export const CONTROL = Object.freeze({ ASSISTED: 'assisted', MANUAL: 'manual' });
+
+export const CONTROL_INFO = [
+  { id: CONTROL.ASSISTED, name: 'Assisted', detail: 'Your player runs themselves. The match pauses when you have a choice to make.' },
+  { id: CONTROL.MANUAL, name: 'Manual', detail: 'You drive your player the whole time. Nothing pauses.' },
+];
+
 export function humanCount(mode) {
   return mode === MODES.SOLO ? 1 : 2;
 }
@@ -36,6 +47,7 @@ export function defaultConfig() {
     mode: MODES.SOLO,
     durationMinutes: DEFAULT_DURATION_MINUTES,
     seed: (Date.now() % 2147483647) | 0,
+    control: CONTROL.ASSISTED,
     aiUsesSpecials: false,
     teams: [
       { presetId: TEAM_PRESETS[0].id, jerseyId: TEAM_PRESETS[0].defaultJersey },
@@ -55,6 +67,7 @@ export function normalizeConfig(input) {
   const minutes = Number(cfg.durationMinutes);
   if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 90) throw new Error('Match duration must be between 0 and 90 minutes');
   if (!Array.isArray(cfg.teams) || cfg.teams.length !== 2) throw new Error('Exactly two teams required');
+  const control = cfg.control === CONTROL.MANUAL ? CONTROL.MANUAL : CONTROL.ASSISTED;
 
   const teams = cfg.teams.map((t, i) => {
     const preset = getTeamPreset(t.presetId);
@@ -85,6 +98,8 @@ export function normalizeConfig(input) {
 
   return {
     mode: cfg.mode,
+    control,
+    assist: control === CONTROL.ASSISTED,
     durationMinutes: minutes,
     halfSeconds: (minutes * 60) / 2,
     seed: (cfg.seed ?? 1) | 0,

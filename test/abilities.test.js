@@ -49,7 +49,7 @@ test('jersey distinctness check', () => {
 });
 
 function playingMatch(humanChar, seed = 3) {
-  const cfg = normalizeConfig({ mode: MODES.SOLO, durationMinutes: 5, seed, humans: [{ characterId: humanChar }] });
+  const cfg = normalizeConfig({ mode: MODES.SOLO, control: 'manual', durationMinutes: 5, seed, humans: [{ characterId: humanChar }] });
   const m = new Match(cfg);
   // The human is the kickoff taker, so press pass once the restart is set.
   for (let i = 0; i < 400 && m.state !== 'PLAY'; i++) {
