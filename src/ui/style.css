@@ -22,7 +22,14 @@ html, body {
   user-select: none;
 }
 
-#game { display: block; position: fixed; inset: 0; touch-action: none; }
+/* Three stacked layers: WebGL pitch, 2D fallback pitch, 2D overlay. Only one
+   of the two pitch layers is ever visible. */
+#gl { display: block; position: fixed; inset: 0; touch-action: none; z-index: 0; }
+#game { display: block; position: fixed; inset: 0; touch-action: none; z-index: 1; }
+/* The HUD and the line you draw sit on a 2D canvas above the 3D one. Input
+   lands here, so it must not swallow touches meant for the pitch. */
+#hud { display: block; position: fixed; inset: 0; touch-action: none; z-index: 2; }
+#gl[hidden], #game[hidden] { display: none !important; }
 
 .overlay {
   position: fixed;

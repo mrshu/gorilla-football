@@ -12,12 +12,19 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%232f7d3a'/><circle cx='16' cy='16' r='6' fill='white'/></svg>">
 </head>
 <body>
+<canvas id="gl" hidden></canvas>
 <canvas id="game"></canvas>
+<canvas id="hud"></canvas>
 <div id="overlay" class="overlay"></div>
 <div id="rotate-hint">Rotate for a bigger pitch</div>
 <script type="module">
   import { App } from './src/ui/app.js';
-  const app = new App({ canvas: document.getElementById('game'), overlay: document.getElementById('overlay') });
+  const app = new App({
+    canvas: document.getElementById('game'),
+    gl: document.getElementById('gl'),
+    hud: document.getElementById('hud'),
+    overlay: document.getElementById('overlay'),
+  });
   window.__app = app;
   // Suppress double-tap zoom / pull-to-refresh gestures on the playfield.
   document.addEventListener('gesturestart', (e) => e.preventDefault());

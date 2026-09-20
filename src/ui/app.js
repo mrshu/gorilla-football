@@ -10,19 +10,28 @@ import { Renderer3D } from './renderer3d.js';
 import { InputManager } from './input.js';
 import { AimInput } from './aiminput.js';
 import { drawHud } from './hud.js';
+import { loadThree } from './three-loader.js';
+import { RendererWebGL } from './renderer_webgl.js';
 import { showMenu, showHowTo, showSetup, showPause, showHalftime, showFullTime, showDecision } from './screens.js';
 
 const SCREEN = { MENU: 'menu', HOWTO: 'howto', SETUP: 'setup', MATCH: 'match', DECISION: 'decision', PAUSE: 'pause', HALFTIME: 'halftime', FULLTIME: 'fulltime' };
 const STORE_KEY = 'gorilla-football/setup';
 
 export class App {
-  constructor({ canvas, overlay }) {
+  constructor({ canvas, gl, hud, overlay }) {
     this.canvas = canvas;
+    // WebGL needs a canvas of its own: an element can only ever hand out one
+    // kind of drawing context, and the 2D renderers claim this one.
+    this.glCanvas = gl || null;
+    // The HUD canvas sits on top and receives the touches, so that the 3D
+    // canvas underneath can be either a 2D context or a WebGL one.
+    this.hudCanvas = hud || canvas;
     this.overlay = overlay;
     this.renderer = new Renderer(canvas);
     this.renderer3d = new Renderer3D(canvas);
-    this.input = new InputManager(canvas);
-    this.aimInput = new AimInput(canvas);
+    this.webgl = null; // set once three.js has loaded
+    this.input = new InputManager(this.hudCanvas);
+    this.aimInput = new AimInput(this.hudCanvas);
     this.match = null;
     this.setupState = loadSetup();
     this.screen = SCREEN.MENU;
@@ -30,22 +39,78 @@ export class App {
     this.lastTs = 0;
     this.layout = null;
     this.resize();
+    this.initWebGL();
     window.addEventListener('resize', () => this.resize());
     window.addEventListener('orientationchange', () => setTimeout(() => this.resize(), 250));
     this.goMenu();
     requestAnimationFrame((t) => this.frame(t));
   }
 
+  // Load three.js in the background. If it is not reachable, for instance on
+  // a machine with no internet, the canvas renderer carries on unchanged.
+  async initWebGL() {
+    const THREE = await loadThree();
+    if (!THREE) {
+      this.webglStatus = 'unavailable';
+      return;
+    }
+    if (!this.glCanvas) {
+      this.webglStatus = 'no canvas';
+      return;
+    }
+    try {
+      this.webgl = new RendererWebGL(this.glCanvas, THREE);
+      this.webglStatus = 'ready';
+      this.resize();
+      if (this.match) this.webgl.resetCamera(this.match, this.layout);
+    } catch (err) {
+      this.webgl = null;
+      this.webglStatus = `failed: ${err && err.message}`;
+    }
+    this.updateLayerVisibility();
+  }
+
+  get pitchRenderer() {
+    return this.useWebGL ? this.webgl : this.renderer3d;
+  }
+
+  // WebGL only draws the whole-team stadium view; the two top-down control
+  // styles keep the flat renderer.
+  get useWebGL() {
+    return Boolean(this.webgl && this.isAim);
+  }
+
+  updateLayerVisibility() {
+    if (!this.glCanvas) return;
+    const gl = this.useWebGL;
+    this.glCanvas.hidden = !gl;
+    this.canvas.hidden = gl;
+  }
+
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.floor(window.innerWidth);
     const h = Math.floor(window.innerHeight);
+    this.cssSize = { w, h };
+    // The HUD canvas is always 2D, whatever the pitch is being drawn with.
+    if (this.hudCanvas !== this.canvas) {
+      this.hudCanvas.width = Math.floor(w * dpr);
+      this.hudCanvas.height = Math.floor(h * dpr);
+      this.hudCanvas.style.width = `${w}px`;
+      this.hudCanvas.style.height = `${h}px`;
+      this.hudCanvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
     this.canvas.width = Math.floor(w * dpr);
     this.canvas.height = Math.floor(h * dpr);
     this.canvas.style.width = `${w}px`;
     this.canvas.style.height = `${h}px`;
     this.canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.cssSize = { w, h };
+    if (this.webgl) {
+      this.glCanvas.style.width = `${w}px`;
+      this.glCanvas.style.height = `${h}px`;
+      this.webgl.setSize(w, h);
+    }
+    this.updateLayerVisibility();
     this.updateLayout();
   }
 
@@ -55,9 +120,10 @@ export class App {
     const humans = this.match ? this.match.humanInputs.length : humanCount(mode);
     if (control === CONTROL.AIM) {
       this.layout = computeAimLayout(this.cssSize.w, this.cssSize.h, humans, this.viewAttackDir());
-      this.renderer3d.camera.setViewport(this.layout.w, this.layout.h);
-      if (this.match) this.renderer3d.updateCamera(this.match, this.layout, 1);
-      this.aimInput.configure({ zones: this.layout.zones, pauseButton: this.layout.pauseBtn, camera: this.renderer3d.camera });
+      const pitch = this.pitchRenderer;
+      pitch.camera.setViewport(this.layout.w, this.layout.h);
+      if (this.match) pitch.updateCamera(this.match, this.layout, 1);
+      this.aimInput.configure({ zones: this.layout.zones, pauseButton: this.layout.pauseBtn, camera: pitch.camera });
       return;
     }
     this.layout = computeLayout(this.cssSize.w, this.cssSize.h, humans, mode === MODES.COOP);
@@ -111,6 +177,8 @@ export class App {
     this.renderer.floats = [];
     this.renderer3d.floats = [];
     this.renderer3d.resetCamera(this.match, this.layout);
+    if (this.webgl) this.webgl.resetCamera(this.match, this.layout);
+    this.updateLayerVisibility();
     this.overlay.hidden = true;
     this.overlay.innerHTML = '';
     this.screen = SCREEN.MATCH;
@@ -194,7 +262,7 @@ export class App {
   // Turn finished drags into kicks and taps into presses.
   feedAimInput() {
     const m = this.match;
-    this.aimInput.configure({ camera: this.renderer3d.camera });
+    this.aimInput.configure({ camera: this.pitchRenderer.camera });
     for (const r of this.aimInput.drainReleases()) {
       if (r.tap) {
         m.tap(r.human);
@@ -307,21 +375,43 @@ export class App {
           });
         }
       }
-      this.renderer3d.draw(this.match, this.layout, {
-        dt: this.screen === SCREEN.MATCH ? dtReal : 0,
+      const pitch = this.pitchRenderer;
+      const dt = this.screen === SCREEN.MATCH ? dtReal : 0;
+      pitch.draw(this.match, this.layout, {
+        dt,
         controlledIds,
         controlColours: ['#ffe600', '#00e5ff'],
-        aim: aims[0] || null,
+        aim: this.useWebGL ? null : aims[0] || null,
       });
-      drawHud(this.renderer3d.ctx, this.match, this.layout, { hint: this.aimHint() });
+      // The line you draw and the scoreboard are painted on the overlay so
+      // they look identical whichever pitch renderer is running.
+      const hud = this.hudContext();
+      if (hud) {
+        hud.clearRect(0, 0, this.layout.w, this.layout.h);
+        if (this.useWebGL) {
+          // Reuse the canvas renderer's overlay drawing, pointed at the same
+          // camera the WebGL scene is using so the two line up exactly.
+          this.renderer3d.camera = this.webgl.camera;
+          if (aims[0]) this.renderer3d.drawAim(hud, this.match, this.layout, { aim: aims[0] });
+          this.renderer3d.drawFloats(hud, this.layout, dt);
+        }
+        drawHud(hud, this.match, this.layout, { hint: this.aimHint() });
+      }
       return;
     }
+    const hud = this.hudCanvas !== this.canvas ? this.hudCanvas.getContext('2d') : null;
+    if (hud) hud.clearRect(0, 0, this.layout.w, this.layout.h);
     this.renderer.draw(this.match, this.layout, {
       dt: this.screen === SCREEN.DECISION ? 0 : dtReal,
       sticks: this.input.sticks,
       pressed: this.input.pressed,
       decision: this.screen === SCREEN.DECISION ? this.match.pendingDecision : null,
     });
+  }
+
+  hudContext() {
+    if (this.hudCanvas === this.canvas) return this.useWebGL ? null : this.renderer3d.ctx;
+    return this.hudCanvas.getContext('2d');
   }
 
   // One short line telling the player what their touch will do right now.
