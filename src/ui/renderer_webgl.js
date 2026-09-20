@@ -254,7 +254,9 @@ export class RendererWebGL {
     // renderer lives on. Rebuild that player's visual instead of leaving the
     // previous model cached under the same simulation id.
     if (view) scene.remove(view.group);
-    const size = p.character.look.size * 1.4;
+    const look = p.character.look;
+    const shape = look.shape;
+    const size = look.size * 1.55;
     const S = (n) => n * size;
     const group = new THREE.Group();
 
@@ -262,12 +264,13 @@ export class RendererWebGL {
     const shirt = material(p.jersey.primary);
     const shortsMat = material(shade(p.jersey.primary, -0.5));
     const sockMat = material(p.jersey.secondary);
-    const skin = material(p.character.look.skin, 0.92);
-    const hairMat = material(p.character.look.accent);
-    const accent = material(p.character.look.accent);
+    const skin = material(look.skin, 0.92);
+    const hairMat = material(look.accent);
+    const accent = material(look.accent);
     const white = material('#f5f4e9', 0.9);
     const black = material('#111321', 0.72);
     const boot = material('#23262b', 0.62);
+    const sole = material('#0d0f16', 0.58);
 
     const mesh = (geo, mat, x = 0, y = 0, z = 0) => {
       const m = new THREE.Mesh(geo, mat);
@@ -282,88 +285,129 @@ export class RendererWebGL {
       return m;
     };
 
-    const eye = (x, y, z = -0.15) => sphere(black, x, y, z, 0.7, 0.8, 0.42, 8);
+    const bone = (mat, from, to, startRadius, endRadius, segments = 10) => {
+      const a = new THREE.Vector3(S(from[0]), S(from[1]), S(from[2]));
+      const b = new THREE.Vector3(S(to[0]), S(to[1]), S(to[2]));
+      const direction = new THREE.Vector3().subVectors(b, a);
+      const length = direction.length();
+      const m = mesh(new THREE.CylinderGeometry(S(endRadius), S(startRadius), length, segments), mat);
+      m.position.copy(a).add(b).multiplyScalar(0.5);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+      return m;
+    };
+
+    const lathe = (mat, profile, segments = 14) => {
+      const points = profile.map(([radius, y]) => new THREE.Vector2(S(radius), S(y)));
+      const geo = new THREE.LatheGeometry(points, segments);
+      geo.computeVertexNormals();
+      return mesh(geo, mat);
+    };
+
+    const box = (mat, x, y, z, sx, sy, sz) => mesh(
+      new THREE.BoxGeometry(S(sx), S(sy), S(sz)),
+      mat,
+      S(x),
+      S(y),
+      S(z),
+    );
 
     // Legs: thigh, shin and boot, hung off a hip pivot so they can swing.
     const legs = [];
     for (const side of [-1, 1]) {
       const hip = new THREE.Group();
-      hip.position.set(side * S(0.13), S(0.82), 0);
-      hip.add(mesh(new THREE.CylinderGeometry(S(0.1), S(0.085), S(0.42), 8), shortsMat, 0, S(-0.21), 0));
+      hip.position.set(side * S(0.14), S(0.96), 0);
+      hip.add(bone(shortsMat, [0, 0, 0], [side * 0.035, -0.36, 0.01], 0.15, 0.11));
       const knee = new THREE.Group();
-      knee.position.set(0, S(-0.42), 0);
-      knee.add(mesh(new THREE.CylinderGeometry(S(0.075), S(0.06), S(0.4), 8), sockMat, 0, S(-0.2), 0));
-      knee.add(mesh(new THREE.BoxGeometry(S(0.16), S(0.09), S(0.3)), boot, 0, S(-0.42), S(0.05)));
+      knee.position.set(0, S(-0.36), 0);
+      knee.add(bone(sockMat, [0, 0, 0], [side * 0.02, -0.39, 0.025], 0.105, 0.075));
+      knee.add(box(boot, side * 0.015, -0.46, -0.055, 0.22, 0.13, 0.36));
+      knee.add(box(sole, side * 0.015, -0.53, -0.07, 0.23, 0.035, 0.38));
       hip.add(knee);
       group.add(hip);
       legs.push({ hip, knee });
     }
 
-    // Shorts, torso, collar and a clean kit stripe give the model a stronger
-    // silhouette than a stack of unadorned cylinders.
-    group.add(mesh(new THREE.SphereGeometry(S(0.32), 12, 8), shortsMat, 0, S(0.92), 0));
-    const torso = mesh(new THREE.SphereGeometry(S(0.39), 12, 9), shirt, 0, S(1.34), 0);
-    torso.scale.set(0.78, 1.05, 0.62);
+    // A fitted jersey and separate pelvis give the character an actual torso
+    // silhouette instead of the old stack of spheres.
+    group.add(lathe(shortsMat, [
+      [0.18, 0.72], [0.28, 0.76], [0.31, 0.94], [0.27, 1.06], [0.17, 1.1],
+    ]));
+    const torso = lathe(shirt, [
+      [0.2, 1.0], [0.29, 1.05], [0.36, 1.2], [0.4, 1.42], [0.36, 1.58], [0.22, 1.68],
+    ]);
     group.add(torso);
-    group.add(mesh(new THREE.TorusGeometry(S(0.22), S(0.035), 6, 12), accent, 0, S(1.65), 0));
-    const stripe = mesh(new THREE.BoxGeometry(S(0.48), S(0.07), S(0.035)), accent, 0, S(1.35), S(-0.24));
+    const collar = mesh(new THREE.TorusGeometry(S(0.22), S(0.026), 6, 14), accent, 0, S(1.64), 0);
+    collar.rotation.x = Math.PI / 2;
+    collar.castShadow = false;
+    group.add(collar);
+    const stripe = box(accent, 0, 1.36, 0.35, 0.42, 0.055, 0.025);
     stripe.castShadow = false;
     group.add(stripe);
-    // Shoulders, so the silhouette is not a tube.
-    group.add(sphere(shirt, -0.26, 1.55, 0, 1.05, 0.95, 0.9));
-    group.add(sphere(shirt, 0.26, 1.55, 0, 1.05, 0.95, 0.9));
+    const sidePanel = (side) => {
+      const panel = box(accent, side * 0.34, 1.34, 0.08, 0.035, 0.42, 0.025);
+      panel.castShadow = false;
+      return panel;
+    };
+    group.add(sidePanel(-1), sidePanel(1));
 
     // Arms: a sleeve in the shirt colour, then a bare forearm.
     const arms = [];
     for (const side of [-1, 1]) {
       const shoulder = new THREE.Group();
-      shoulder.position.set(side * S(0.3), S(1.56), 0);
-      shoulder.add(mesh(new THREE.CylinderGeometry(S(0.09), S(0.065), S(0.29), 8), shirt, 0, S(-0.14), 0));
-      shoulder.add(mesh(new THREE.CylinderGeometry(S(0.065), S(0.05), S(0.29), 8), skin, 0, S(-0.43), 0));
-      shoulder.add(sphere(skin, 0, -0.61, 0, 0.72, 0.72, 0.72, 8));
+      shoulder.position.set(side * S(0.34), S(1.55), 0);
+      shoulder.add(bone(shirt, [0, 0, 0], [side * 0.015, -0.25, 0], 0.14, 0.095));
+      shoulder.add(bone(skin, [side * 0.015, -0.23, 0], [side * 0.035, -0.53, -0.015], 0.095, 0.06));
+      shoulder.add(sphere(skin, side * 0.035, -0.58, -0.02, 0.62, 0.68, 0.62, 8));
       group.add(shoulder);
       arms.push(shoulder);
     }
 
-    // Neck, head, eyes and a small mouth/visor cue. The face is intentionally
-    // graphic so it reads even when a player is only a few pixels tall.
+    // Neck and a compact face. The brows, nose, and mouth sit on separate
+    // planes so the head reads as a character rather than a colored ball.
     group.add(mesh(new THREE.CylinderGeometry(S(0.08), S(0.09), S(0.1), 8), skin, 0, S(1.66), 0));
-    const head = mesh(new THREE.SphereGeometry(S(0.2), 14, 10), skin, 0, S(1.84), 0);
-    head.scale.set(0.95, 1.1, 0.92);
+    const head = mesh(new THREE.SphereGeometry(S(0.17), 14, 10), skin, 0, S(1.84), 0);
+    head.scale.set(0.92, 1.04, 0.86);
     group.add(head);
-    group.add(eye(-0.075, 1.88));
-    group.add(eye(0.075, 1.88));
-    const mouth = mesh(new THREE.BoxGeometry(S(0.12), S(0.025), S(0.025)), black, 0, S(1.75), S(-0.175));
+    const eye = (x) => sphere(black, x, 1.88, 0.17, 0.55, 0.72, 0.34, 8);
+    group.add(eye(-0.07), eye(0.07));
+    group.add(box(black, -0.07, 1.95, 0.18, 0.11, 0.025, 0.03));
+    group.add(box(black, 0.07, 1.95, 0.18, 0.11, 0.025, 0.03));
+    group.add(sphere(skin, 0, 1.82, 0.19, 0.26, 0.3, 0.24, 8));
+    const mouth = box(black, 0, 1.75, 0.18, 0.11, 0.02, 0.025);
     mouth.castShadow = false;
     group.add(mouth);
+    group.add(sphere(skin, -0.17, 1.85, 0, 0.28, 0.44, 0.3, 8));
+    group.add(sphere(skin, 0.17, 1.85, 0, 0.28, 0.44, 0.3, 8));
 
-    const shape = p.character.look.shape;
     if (shape === 'gorilla') {
-      group.add(sphere(hairMat, 0, 1.96, 0.01, 1.5, 1.05, 1.1, 10));
-      group.add(sphere(accent, 0, 1.78, -0.19, 1.0, 0.62, 0.35, 10));
-      group.add(sphere(accent, -0.23, 1.86, 0, 0.58, 0.7, 0.55, 8));
-      group.add(sphere(accent, 0.23, 1.86, 0, 0.58, 0.7, 0.55, 8));
-      group.add(sphere(shirt, -0.36, 1.38, 0, 1.15, 1.25, 1.05, 10));
-      group.add(sphere(shirt, 0.36, 1.38, 0, 1.15, 1.25, 1.05, 10));
+      const cap = mesh(new THREE.SphereGeometry(S(0.2), 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.7), hairMat, 0, S(1.96), S(0.12));
+      cap.scale.set(1.14, 1.12, 0.78);
+      group.add(cap);
+      group.add(sphere(accent, 0, 1.79, 0.19, 0.85, 0.56, 0.34, 10));
+      group.add(box(hairMat, -0.16, 1.94, 0.17, 0.16, 0.045, 0.04));
+      group.add(box(hairMat, 0.16, 1.94, 0.17, 0.16, 0.045, 0.04));
     } else if (shape === 'tortoise') {
-      const shell = mesh(new THREE.DodecahedronGeometry(S(0.42), 1), accent, 0, S(1.35), S(0.24));
-      shell.scale.set(1.1, 1.05, 0.48);
+      const shell = sphere(accent, -0.12, 1.38, 0.02, 1.18, 1.1, 0.62, 16);
       group.add(shell);
-      group.add(sphere(accent, 0, 1.98, 0, 0.88, 0.72, 0.9, 10));
-      group.add(sphere(skin, 0, 1.76, -0.19, 0.72, 0.62, 0.38, 10));
+      const shellEdge = material(shade(look.accent, -0.18));
+      const ridge = mesh(new THREE.TorusGeometry(S(0.32), S(0.022), 5, 16), shellEdge, -S(0.12), S(1.38), S(0.16));
+      ridge.rotation.x = Math.PI / 2;
+      ridge.scale.set(1.28, 0.92, 1);
+      ridge.castShadow = false;
+      group.add(ridge);
+      group.add(sphere(skin, 0, 1.84, 0.2, 0.7, 0.64, 0.38, 10));
     } else if (shape === 'wizard') {
       const brim = mesh(new THREE.CylinderGeometry(S(0.28), S(0.28), S(0.06), 12), accent, 0, S(2.03), 0);
       const hat = mesh(new THREE.ConeGeometry(S(0.2), S(0.48), 12), accent, 0, S(2.28), 0);
       hat.rotation.z = -0.16;
       group.add(brim, hat);
-      group.add(sphere(white, 0, 1.78, -0.18, 0.55, 0.42, 0.25, 8));
+      group.add(sphere(white, 0, 1.75, 0.18, 0.5, 0.52, 0.25, 8));
     } else if (shape === 'rocket') {
       const helmet = mesh(new THREE.SphereGeometry(S(0.23), 12, 8), accent, 0, S(1.91), 0);
       helmet.scale.set(1, 0.78, 0.95);
-      group.add(helmet);
-      const visor = mesh(new THREE.BoxGeometry(S(0.27), S(0.09), S(0.025)), black, 0, S(1.9), S(-0.21));
+      group.add(helmet, box(black, 0, 1.9, 0.21, 0.27, 0.09, 0.025));
+      const visor = group.children[group.children.length - 1];
       visor.castShadow = false;
-      group.add(visor);
       for (const side of [-1, 1]) {
         const fin = mesh(new THREE.ConeGeometry(S(0.1), S(0.3), 4), accent, side * S(0.37), S(1.1), S(0.08));
         fin.rotation.z = side * Math.PI / 2;
@@ -373,23 +417,26 @@ export class RendererWebGL {
       // Keep the dark body just behind the kit so the penguin reads clearly
       // without losing the shirt, stripe, or team colour at match distance.
       group.add(sphere(black, 0, 1.37, 0.2, 0.98, 1.04, 0.82, 10));
-      group.add(sphere(white, 0, 1.38, -0.24, 0.62, 0.88, 0.28, 10));
-      const beak = mesh(new THREE.ConeGeometry(S(0.09), S(0.2), 4), accent, 0, S(1.77), S(-0.29));
+      group.add(sphere(white, 0, 1.38, 0.24, 0.62, 0.88, 0.28, 10));
+      const beak = mesh(new THREE.ConeGeometry(S(0.09), S(0.2), 4), accent, 0, S(1.77), S(0.29));
       beak.rotation.x = Math.PI / 2;
       group.add(beak);
     } else if (shape === 'yeti') {
-      group.add(sphere(white, 0, 1.96, 0, 1.35, 1.25, 1.2, 10));
-      group.add(sphere(accent, 0, 1.79, -0.2, 0.72, 0.55, 0.32, 10));
-      group.add(sphere(white, -0.36, 1.42, 0.1, 0.9, 1.05, 0.82, 10));
-      group.add(sphere(white, 0.36, 1.42, 0.1, 0.9, 1.05, 0.82, 10));
+      const cap = mesh(new THREE.SphereGeometry(S(0.2), 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.72), white, 0, S(1.96), S(0.12));
+      cap.scale.set(1.1, 1.12, 0.78);
+      group.add(cap);
+      group.add(sphere(accent, 0, 1.79, 0.2, 0.72, 0.55, 0.32, 10));
+      group.add(sphere(white, -0.22, 1.42, 0.1, 0.72, 0.88, 0.72, 10));
+      group.add(sphere(white, 0.22, 1.42, 0.1, 0.72, 0.88, 0.72, 10));
     } else {
       // Plumber: a cap and moustache keep the roster distinct without making
       // the kit unreadable.
       const cap = mesh(new THREE.SphereGeometry(S(0.23), 12, 8), accent, 0, S(1.99), 0);
-      cap.scale.set(1.05, 0.54, 1.05);
+      cap.position.z = S(0.1);
+      cap.scale.set(1.05, 0.54, 0.72);
       group.add(cap);
-      group.add(mesh(new THREE.BoxGeometry(S(0.32), S(0.04), S(0.14)), accent, 0, S(1.92), S(-0.16)));
-      group.add(sphere(hairMat, 0, 1.74, -0.2, 0.7, 0.32, 0.2, 8));
+      group.add(box(accent, 0, 1.92, 0.16, 0.32, 0.04, 0.14));
+      group.add(sphere(hairMat, 0, 1.74, 0.2, 0.7, 0.32, 0.2, 8));
     }
 
     const ring = new THREE.Mesh(
@@ -400,6 +447,9 @@ export class RendererWebGL {
     ring.position.y = 0.03;
     ring.visible = false;
     group.add(ring);
+    // Give the otherwise stylized proportions a little more athlete-like
+    // height without enlarging the selection footprint or boots.
+    group.scale.y = 1.08;
 
     scene.add(group);
     view = { group, ring, torso, legs, arms, head, phase: Math.random() * Math.PI * 2, bob: 0, size, signature };
