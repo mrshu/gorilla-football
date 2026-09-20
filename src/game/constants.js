@@ -85,6 +85,10 @@ export const AIM = Object.freeze({
   dribbleSpeed: 6.5, // m/s of the knock-on from a tap
   dribbleCooldown: 0.26, // seconds before the carrier can take the ball again
   dribbleBoost: 0.5, // seconds of extra pace to chase their own touch
+  pathMinSpacing: 0.6, // metres between kept points of a drawn path
+  pathMaxPoints: 120, // cap on the length of a drawn path
+  pathMargin: 6, // how far outside the pitch a drawn path may reach
+  pathFullPowerMetres: 45, // stroke length on the grass that means full power
 });
 
 export const ROLES = Object.freeze({ GK: 'GK', DF: 'DF', MF: 'MF', FW: 'FW' });

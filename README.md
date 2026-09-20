@@ -6,9 +6,9 @@ and ES modules: no build step, no dependencies, no network calls, and no 3D
 library. The perspective is a hand-rolled projection, so the whole thing is
 still a few files you can read.
 
-You run the whole team, not one striker, with one finger: **tap to dribble,
-slide to pass or shoot**. There is no separate pass and shoot button, because
-the ball goes exactly where you aimed, as hard as you hit it.
+You run the whole team, not one striker, with one finger: **tap to dribble, or
+draw a line and the ball follows it**. Curve the line around a defender and the
+ball curves with it. There is no separate pass and shoot button.
 
 ![A match in landscape](docs/screenshots/match.png)
 
@@ -67,11 +67,17 @@ included, runs themselves; your job is the ball.
 | --- | --- |
 | **Tap**, with the ball | Dribble: knock it into space ahead and chase it. |
 | **Tap**, without the ball | Close the carrier down. |
-| **Hold and slide** | Aim. A guide shows where the ball will travel, and dragging further gives more power. |
-| **Release** | Pass or shoot, exactly where you aimed, as hard as you dragged. |
+| **Draw a line** with your finger | The line appears on the grass. That is the route the ball will take. |
+| **Release** | The ball sets off along the line you drew. |
 
-Dribble by tap, pass and shoot by slide. There is no separate pass and shoot
-button, because the ball simply goes where you aimed at the power you hit it.
+You are not aiming in a straight line: you are **drawing the pass**. Curve the
+line around a defender and the ball curves around the defender. The shape is
+what matters, not where on the screen you drew it, because the line is anchored
+to the ball. A longer line means a harder ball, and the ball is interceptible
+the whole way, so a route through a crowd is a gamble.
+
+There is no separate pass and shoot button. Draw a line that ends in the net and
+that was a shot.
 
 The player on the ball is ringed. Restarts work the same way: aim and release to
 take the throw, corner, free kick or penalty. Leave your carrier alone for six
@@ -266,9 +272,14 @@ asked about:
   does not swing about as the ball moves. The parameters were picked by a search
   that required the ball to stay on screen from every point on the pitch at four
   screen sizes; `test/camera.test.js` checks that it still does.
-- **One kick covers passing and shooting.** The ball goes where it is aimed at
-  the power it was hit, which is what makes a single touch enough to play a
-  whole match.
+- **You draw the pass, you do not aim it.** The whole stroke is captured,
+  projected onto the grass and followed by the ball, so a curled ball round a
+  defender is something you draw rather than something the game does for you.
+  A straight-line aim is kept only as a fallback for when the stroke cannot be
+  resolved onto the pitch, such as a finger dragged above the horizon.
+- **The drawn ball stays interceptible.** It follows the line but anyone can cut
+  it out, so drawing a route through traffic is a real risk rather than a
+  guaranteed delivery.
 - **A tap is a real touch, not a free ride.** Dribbling knocks the ball into
   space ahead and gives the carrier a short burst to chase it, so an opponent
   standing in the way can nick it. Tapping forward has to be a decision or it

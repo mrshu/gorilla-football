@@ -94,6 +94,7 @@ export function createBall() {
     lastTouchTeam: null,
     // Special-ability behaviour
     homing: null, // { target:{x,y} | playerId, speed, unstoppable, assistFor }
+    path: null, // { points:[{x,y}], index, speed } while following a drawn line
     unstoppable: false,
   };
 }

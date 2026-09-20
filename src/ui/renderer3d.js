@@ -418,11 +418,16 @@ export class Renderer3D {
   drawAim(ctx, match, layout, opts) {
     const aim = opts.aim;
     if (!aim || !aim.active) return;
+    const colour = aim.colour || '#ffe600';
+    if (aim.path && aim.path.length >= 2) {
+      this.drawDrawnPath(ctx, aim.path, colour);
+      this.drawPowerRing(ctx, aim, colour);
+      return;
+    }
     const from = aim.from;
     const dir = aim.dir;
     const power = clamp(aim.power, 0, 1);
     const reach = 6 + power * 34;
-    const colour = aim.colour || '#ffe600';
     ctx.save();
     // A tapering guide along the grass.
     const steps = 14;
@@ -450,11 +455,47 @@ export class Renderer3D {
       ctx.fill();
     }
     ctx.restore();
+    this.drawPowerRing(ctx, aim, colour);
+  }
 
-    // Power meter at the touch point.
+  // The line the finger has traced, laid on the grass. This is literally the
+  // route the ball will take, so it is drawn solid and bright with a moving
+  // head rather than as a hint.
+  drawDrawnPath(ctx, path, colour) {
+    const pts = [];
+    for (const p of path) {
+      const s = this.camera.project({ x: p.x, y: p.y, z: 0.06 });
+      if (!s.visible) break;
+      pts.push(s);
+    }
+    if (pts.length < 2) return;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    // A dark backing stroke so the line reads against any shade of grass.
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = Math.max(5, pts[0].scale * 0.4);
+    strokePolyline(ctx, pts);
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = Math.max(3, pts[0].scale * 0.26);
+    strokePolyline(ctx, pts);
+    // Head of the line, where the ball will end up.
+    const tip = pts[pts.length - 1];
+    ctx.fillStyle = colour;
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, Math.max(4, tip.scale * 0.4), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  drawPowerRing(ctx, aim, colour) {
+    const power = clamp(aim.power, 0, 1);
     if (aim.screen) {
       const { x, y } = aim.screen;
-      const r = 30;
+      const r = 26;
       ctx.save();
       ctx.lineWidth = 5;
       ctx.strokeStyle = 'rgba(255,255,255,0.22)';
@@ -580,4 +621,11 @@ function shade(hex, amount) {
     Math.round(clamp(amount < 0 ? c * (1 + amount) : c + (255 - c) * amount, 0, 255)),
   );
   return `rgb(${ch[0]},${ch[1]},${ch[2]})`;
+}
+
+function strokePolyline(ctx, pts) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.stroke();
 }

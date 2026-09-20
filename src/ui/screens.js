@@ -42,9 +42,11 @@ export function showHowTo(root, onBack) {
     <ul>
       <li><b>Tap</b> with the ball to dribble: you knock it into space ahead and chase it.</li>
       <li><b>Tap</b> without the ball to close the other side down.</li>
-      <li><b>Hold and slide</b> to aim. A guide shows where the ball will go, and sliding further gives more power.</li>
-      <li><b>Release</b> to pass or shoot. There is no separate pass and shoot: the ball goes exactly where you aimed, as hard as you hit it.</li>
+      <li><b>Draw a line</b> with your finger. It appears on the grass, and that is the route the ball will take.</li>
+      <li><b>Release</b> and the ball sets off along your line. Curve it around a defender and the ball curves too.</li>
     </ul>
+    <p>A longer line means a harder ball. The line is anchored to the ball, so the shape is what counts, not where you drew it. The ball can be cut out along the way, so a route through a crowd is a gamble.</p>
+    <p>There is no separate pass and shoot. Draw a line that ends in the net and that was a shot.</p>
     <p>The player on the ball is ringed. If you leave them alone too long they will play it themselves, so the match never stalls.</p>
     <p>Restarts work the same way: aim and release to take the throw, corner, free kick or penalty.</p>
     <h4>One player</h4>

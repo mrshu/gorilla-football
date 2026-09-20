@@ -200,6 +200,9 @@ export class App {
         m.tap(r.human);
         continue;
       }
+      // Prefer the drawn line; fall back to a straight kick if the stroke
+      // could not be resolved onto the grass.
+      if (r.path && m.aimPath(r.human, anchorToBall(r.path, m.ball.pos))) continue;
       if (!m.aimKick(r.human, r.dir, r.power)) m.tap(r.human);
     }
   }
@@ -296,7 +299,12 @@ export class App {
         if (active) controlledIds.add(active.id);
         const state = this.aimInput.aimState(i);
         if (state && state.active && this.match.canKick(i)) {
-          aims.push({ ...state, from: this.match.ball.pos, colour: i === 0 ? '#ffe600' : '#00e5ff' });
+          aims.push({
+            ...state,
+            from: this.match.ball.pos,
+            path: state.path ? anchorToBall(state.path, this.match.ball.pos) : null,
+            colour: i === 0 ? '#ffe600' : '#00e5ff',
+          });
         }
       }
       this.renderer3d.draw(this.match, this.layout, {
@@ -357,4 +365,13 @@ function saveSetup(state) {
   } catch {
     /* private mode */
   }
+}
+
+// Slide a drawn path so it starts at the ball. The shape is what was drawn;
+// where on the pitch it was drawn does not matter.
+function anchorToBall(path, ballPos) {
+  if (!path || path.length < 2) return path;
+  const dx = ballPos.x - path[0].x;
+  const dy = ballPos.y - path[0].y;
+  return path.map((p) => ({ x: p.x + dx, y: p.y + dy }));
 }

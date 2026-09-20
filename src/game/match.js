@@ -206,6 +206,7 @@ export class Match {
     const ball = this.ball;
     ball.owner = null;
     ball.homing = null;
+    ball.path = null;
     ball.unstoppable = false;
     ball.vel = { x: 0, y: 0 };
     ball.z = 0;
@@ -537,6 +538,16 @@ export class Match {
     return false;
   }
 
+  // Queue a drawn path for this frame. `points` is a world-space polyline in
+  // metres, as traced by the finger. Returns true if it was accepted.
+  aimPath(humanIndex, points) {
+    if (!this.canKick(humanIndex)) return false;
+    const path = sanitisePath(points);
+    if (path.length < 2) return false;
+    this.aimKicks[humanIndex] = { path };
+    return true;
+  }
+
   // Queue a kick for this frame. `dir` is a unit vector on the pitch and
   // `power` runs 0..1. Returns true if it was accepted.
   aimKick(humanIndex, dir, power) {
@@ -629,7 +640,9 @@ export class Match {
 
   // One kick covers passing and shooting: the ball simply goes where it is
   // aimed, as hard as it was hit.
-  playBall(kicker, { dir, power }, { setPieceKind = null } = {}) {
+  playBall(kicker, kick, { setPieceKind = null } = {}) {
+    if (kick.path) return this.playBallAlongPath(kicker, kick.path, { setPieceKind });
+    const { dir, power } = kick;
     const speed = AIM.minSpeed + power * (kicker.phys.shotSpeed - AIM.minSpeed);
     // Aiming is forgiving at low power and demanding at high power, and a
     // better striker strays less either way.
@@ -655,6 +668,54 @@ export class Match {
     }
     this.kick(kicker, aimed, speed, { vz, kind: towardsGoal ? 'shot' : 'pass' });
     if (towardsGoal) this.emit('shot', { playerId: kicker.id, team: kicker.team });
+  }
+
+  // Send the ball along the line that was drawn. The path is anchored to the
+  // ball, so what you draw is the shape of the pass, not where on the pitch
+  // you happened to draw it. The ball is interceptible the whole way.
+  playBallAlongPath(kicker, drawn, { setPieceKind = null } = {}) {
+    const start = { ...this.ball.pos };
+    const anchored = anchorPath(drawn, start);
+    const length = pathLength(anchored);
+    // A long stroke is a harder ball, the way a longer backlift is.
+    const power = clamp(length / AIM.pathFullPowerMetres, 0.12, 1);
+    const speed = AIM.minSpeed + power * (kicker.phys.shotSpeed - AIM.minSpeed);
+    const first = anchored[1] || anchored[0];
+    const dir = norm(sub(first, start));
+
+    if (setPieceKind) {
+      this.state = STATES.PLAY;
+      const sp = this.setPiece;
+      this.setPiece = null;
+      this.ball.pos = { ...sp.pos };
+      kicker.kickCooldown = 0;
+    }
+    const goal = goalCenter(this.teams[kicker.team].attackDir);
+    const last = anchored[anchored.length - 1];
+    const towardsGoal = dist(last, goal) < 6 && dist(kicker.pos, goal) < 46;
+    if (towardsGoal) {
+      this.stats.shots[kicker.team]++;
+      this.emit('shot', { playerId: kicker.id, team: kicker.team });
+    }
+
+    this.ball.owner = null;
+    this.ball.homing = null;
+    this.ball.unstoppable = false;
+    this.ball.z = 0;
+    this.ball.vz = 0;
+    this.ball.vel = scale(dir, speed);
+    this.ball.path = { points: anchored.slice(1), index: 0, speed };
+    kicker.kickCooldown = PHYSICS.kickCooldown;
+    kicker.facing = dir;
+    kicker.holdingBall = 0;
+    this.ball.lastTouch = kicker.id;
+    this.ball.lastTouchTeam = kicker.team;
+    if (setPieceKind && !offsideExemptSetPiece(setPieceKind)) this.flagOffside(kicker);
+    else if (setPieceKind) this.clearOffsideFlags();
+    else this.flagOffside(kicker);
+    this.emit('kick', { playerId: kicker.id, kind: towardsGoal ? 'shot' : 'pass' });
+    if (setPieceKind === SET_PIECES.KICKOFF) this.emit('kickoff', { team: kicker.team });
+    if (setPieceKind) this.emit('whistle');
   }
 
   pressWithNearest(humanIndex) {
@@ -900,6 +961,7 @@ export class Match {
     }
     ball.owner = p.id;
     ball.homing = null;
+    ball.path = null;
     ball.unstoppable = false;
     ball.vel = { ...p.vel };
     ball.z = 0;
@@ -1006,6 +1068,7 @@ export class Match {
     const d = len(dir) > 0.01 ? norm(dir) : { x: this.teams[p.team].attackDir, y: 0 };
     ball.owner = null;
     ball.homing = null;
+    ball.path = null;
     ball.unstoppable = false;
     ball.pos = add(p.pos, scale(d, PHYSICS.playerRadius + PHYSICS.ballRadius + 0.1));
     ball.vel = scale(d, Math.min(speed, PHYSICS.maxBallSpeed));
@@ -1398,6 +1461,10 @@ export class Match {
   integrateBall(dt) {
     const ball = this.ball;
     if (ball.owner !== null) return;
+    if (ball.path) {
+      this.followPath(dt);
+      return;
+    }
     if (ball.homing) {
       const target = ball.homing.point || this.getPlayer(ball.homing.playerId).pos;
       const to = sub(target, ball.pos);
@@ -1447,6 +1514,39 @@ export class Match {
     }
   }
 
+  // Walk the ball along the remaining points of a drawn path. Distance per
+  // frame comes from the path's speed, so a long stroke is not slower than a
+  // short one; only the drawn shape decides where it goes.
+  followPath(dt) {
+    const ball = this.ball;
+    const path = ball.path;
+    let budget = path.speed * dt;
+    while (budget > 0 && path.index < path.points.length) {
+      const target = path.points[path.index];
+      const to = sub(target, ball.pos);
+      const d = len(to);
+      if (d <= 1e-6) {
+        path.index++;
+        continue;
+      }
+      const dir = scale(to, 1 / d);
+      if (d > budget) {
+        ball.pos = add(ball.pos, scale(dir, budget));
+        ball.vel = scale(dir, path.speed);
+        budget = 0;
+      } else {
+        ball.pos = { ...target };
+        ball.vel = scale(dir, path.speed);
+        budget -= d;
+        path.index++;
+      }
+    }
+    ball.z = 0;
+    ball.vz = 0;
+    // The path is spent: the ball rolls on in the direction it was last going.
+    if (path.index >= path.points.length) ball.path = null;
+  }
+
   checkOutOfPlay() {
     const ball = this.ball;
     const teams = this.teams.map((t) => ({ index: t.index, attackDir: t.attackDir }));
@@ -1473,6 +1573,7 @@ export class Match {
     this.pendingKickoffTeam = 1 - teamIdx;
     this.ball.owner = null;
     this.ball.homing = null;
+    this.ball.path = null;
     this.ball.unstoppable = false;
     this.ball.vel = { x: 0, y: 0 };
     for (const p of this.players) p.desiredVel = { x: 0, y: 0 };
@@ -1482,6 +1583,7 @@ export class Match {
     this.clock.time = this.clock.halfSeconds;
     this.ball.owner = null;
     this.ball.homing = null;
+    this.ball.path = null;
     this.ball.vel = { x: 0, y: 0 };
     this.setPiece = null;
     if (this.clock.half === 1) {
@@ -1492,4 +1594,40 @@ export class Match {
       this.emit('fulltime', { score: [this.teams[0].score, this.teams[1].score] });
     }
   }
+}
+
+// ---------------------------------------------------------------- helpers
+
+// Drop points that are too close together, cap the total number, and keep the
+// path inside the pitch so a wild stroke cannot send the ball to another county.
+function sanitisePath(points) {
+  const out = [];
+  for (const p of points) {
+    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+    const q = {
+      x: clamp(p.x, -AIM.pathMargin, PITCH.length + AIM.pathMargin),
+      y: clamp(p.y, -AIM.pathMargin, PITCH.width + AIM.pathMargin),
+    };
+    if (out.length && dist(out[out.length - 1], q) < AIM.pathMinSpacing) continue;
+    out.push(q);
+    if (out.length >= AIM.pathMaxPoints) break;
+  }
+  return out;
+}
+
+// Slide a drawn path so it begins at the ball: the shape is what was drawn,
+// the position is wherever the ball happens to be.
+function anchorPath(points, start) {
+  const dx = start.x - points[0].x;
+  const dy = start.y - points[0].y;
+  return points.map((p) => ({
+    x: clamp(p.x + dx, -AIM.pathMargin, PITCH.length + AIM.pathMargin),
+    y: clamp(p.y + dy, -AIM.pathMargin, PITCH.width + AIM.pathMargin),
+  }));
+}
+
+function pathLength(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += dist(points[i - 1], points[i]);
+  return total;
 }

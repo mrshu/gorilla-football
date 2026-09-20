@@ -121,8 +121,17 @@ The default control style gives the human no player to steer. Everyone,
 including the human's nominal footballer, is driven by the outfield AI. The
 human's entire input is the ball:
 
-- `aimKick(human, dir, power)` queues a kick, and `applyAimInputs()` plays it at
-  the top of the next step so a release lands on the frame the finger lifted.
+- `aimPath(human, points)` queues a drawn line, and `applyAimInputs()` plays it
+  at the top of the next step so a release lands on the frame the finger lifted.
+  `aimKick(human, dir, power)` is the straight-line fallback for a stroke that
+  could not be projected onto the grass.
+- `playBallAlongPath()` anchors the drawn shape to the ball, derives power from
+  the stroke's length on the grass, and hands the ball a `path`.
+  `followPath()` then walks the ball point to point each frame, spending a
+  distance budget rather than steering, so the ball traces exactly the line that
+  was drawn. When the points run out the path is dropped and the ball rolls on
+  under ordinary friction. It is never marked unstoppable, so it can be
+  intercepted anywhere along the route.
 - `playBall()` turns direction and power into one kick. There is no pass/shoot
   distinction: speed runs from `AIM.minSpeed` to the kicker's shot speed, aim
   error grows with power and shrinks with the kicker's accuracy, and power above

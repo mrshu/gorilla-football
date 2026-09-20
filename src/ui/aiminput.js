@@ -7,6 +7,10 @@
 
 import { AIM } from '../game/constants.js';
 
+// Stroke sampling, in canvas pixels.
+const STROKE_MIN_PX = 6;
+const STROKE_MAX_POINTS = 240;
+
 export class AimInput {
   constructor(canvas) {
     this.canvas = canvas;
@@ -72,7 +76,7 @@ export class AimInput {
     }
     const human = this.zoneFor(p);
     if (this.drags.has(human)) return; // one finger per player
-    this.drags.set(human, { start: p, current: p, moved: 0 });
+    this.drags.set(human, { start: p, current: p, moved: 0, stroke: [p] });
     this.pointers.set(e.pointerId, human);
   }
 
@@ -85,6 +89,11 @@ export class AimInput {
     if (!d) return;
     d.current = p;
     d.moved = Math.hypot(p.x - d.start.x, p.y - d.start.y);
+    // Keep the whole stroke: the drawn shape is the pass, not just its ends.
+    const last = d.stroke[d.stroke.length - 1];
+    if (Math.hypot(p.x - last.x, p.y - last.y) >= STROKE_MIN_PX && d.stroke.length < STROKE_MAX_POINTS) {
+      d.stroke.push(p);
+    }
   }
 
   onUp(e) {
@@ -97,17 +106,35 @@ export class AimInput {
     this.released.push({ human, ...this.readDrag(d) });
   }
 
-  // Turn a drag into { tap, dir, power }.
+  // Turn a drag into { tap, path, dir, power }. `path` is the stroke projected
+  // onto the grass, which is what the ball actually follows; `dir` and `power`
+  // are kept as a fallback for when the camera cannot resolve the stroke.
   readDrag(d) {
     const dx = d.current.x - d.start.x;
     const dy = d.current.y - d.start.y;
     const moved = Math.hypot(dx, dy);
-    if (moved < AIM.tapPx) return { tap: true, dir: null, power: 0, screen: d.start };
+    if (moved < AIM.tapPx) return { tap: true, path: null, dir: null, power: 0, screen: d.start };
     const dir = this.camera
       ? this.camera.dragToGround(d.start.x, d.start.y, d.current.x, d.current.y)
       : { x: dx, y: dy };
     const power = Math.min(1, (moved - AIM.tapPx) / (AIM.maxDragPx - AIM.tapPx));
-    return { tap: false, dir, power, screen: d.start };
+    return { tap: false, path: this.strokeToGround(d), dir, power, screen: d.start };
+  }
+
+  // Project every point of the stroke onto the grass. Points above the horizon
+  // cannot be resolved, so the path stops there rather than jumping.
+  strokeToGround(d) {
+    if (!this.camera) return null;
+    const pts = (d.stroke || [d.start]).slice();
+    const last = pts[pts.length - 1];
+    if (!last || Math.hypot(d.current.x - last.x, d.current.y - last.y) > 1) pts.push(d.current);
+    const world = [];
+    for (const p of pts) {
+      const g = this.camera.screenToGround(p.x, p.y);
+      if (!g) break;
+      world.push({ x: g.x, y: g.y });
+    }
+    return world.length >= 2 ? world : null;
   }
 
   // Live aim state for the renderer, per human.
@@ -115,8 +142,8 @@ export class AimInput {
     const d = this.drags.get(human);
     if (!d) return null;
     const read = this.readDrag(d);
-    if (read.tap) return { active: false, screen: d.start, power: 0 };
-    return { active: true, dir: read.dir, power: read.power, screen: d.start };
+    if (read.tap) return { active: false, screen: d.start, power: 0, path: null };
+    return { active: true, dir: read.dir, power: read.power, screen: d.start, path: read.path };
   }
 
   drainReleases() {

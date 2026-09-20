@@ -329,3 +329,150 @@ test('a zero-length aim is rejected rather than firing the ball nowhere', () => 
   assert.equal(m.aimKick(0, { x: 0, y: 0 }, 0.5), false);
   assert.equal(m.ball.owner, p.id, 'the player should still have the ball');
 });
+
+// ---------------------------------------------------------------- drawn paths
+
+// A quarter-circle traced to the left of straight ahead, as a finger would.
+function curvePath(start, radius = 12, turns = 10) {
+  const pts = [];
+  for (let i = 0; i <= turns; i++) {
+    const a = (i / turns) * (Math.PI / 2);
+    pts.push({ x: start.x + Math.sin(a) * radius, y: start.y + (1 - Math.cos(a)) * radius });
+  }
+  return pts;
+}
+
+test('the ball follows the line that was drawn, not the straight line to its end', () => {
+  const m = makeMatch({ seed: 31 });
+  intoPlay(m);
+  const p = m.teams[0].players[9];
+  p.pos = { x: 40, y: 20 };
+  giveBall(m, p);
+  for (const o of m.players) if (o.id !== p.id) o.pos = { x: 95, y: 64 };
+  const path = curvePath({ x: 40, y: 20 });
+  assert.ok(m.aimPath(0, path));
+  m.step(PHYSICS.dt);
+  assert.ok(m.ball.path, 'the ball should be following a path');
+  // Straight ahead first: the ball must start off along +x, not diagonally
+  // towards the far end of the curve.
+  const early = norm(m.ball.vel);
+  assert.ok(early.x > 0.9, `the ball should set off along the drawn tangent, got ${JSON.stringify(early)}`);
+  // Follow it to the end and check it arrived near where the line finished.
+  const target = path[path.length - 1];
+  let guard = 0;
+  while (m.ball.path && guard++ < 600) m.step(PHYSICS.dt);
+  assert.ok(dist(m.ball.pos, target) < 3, `ball ended ${dist(m.ball.pos, target).toFixed(1)} m from the end of the line`);
+});
+
+test('a drawn path is anchored to the ball, wherever it was drawn', () => {
+  const m = makeMatch({ seed: 31 });
+  intoPlay(m);
+  const p = m.teams[0].players[9];
+  p.pos = { x: 30, y: 50 };
+  giveBall(m, p);
+  for (const o of m.players) if (o.id !== p.id) o.pos = { x: 95, y: 5 };
+  // Draw the same shape somewhere else entirely.
+  const path = curvePath({ x: 80, y: 10 });
+  assert.ok(m.aimPath(0, path));
+  m.step(PHYSICS.dt);
+  const first = m.ball.path.points[0];
+  assert.ok(dist(first, m.ball.pos) < 3, 'the path should start at the ball, not where it was drawn');
+});
+
+test('the ball can be intercepted part-way along a drawn path', () => {
+  const m = makeMatch({ seed: 31 });
+  intoPlay(m);
+  const p = m.teams[0].players[9];
+  p.pos = { x: 40, y: 34 };
+  giveBall(m, p);
+  for (const o of m.players) if (o.id !== p.id) o.pos = { x: 95, y: 64 };
+  // Stand an opponent squarely in the way.
+  const blocker = m.teams[1].players[5];
+  blocker.pos = { x: 52, y: 34 };
+  blocker.kickCooldown = 0;
+  const straight = [];
+  for (let i = 0; i <= 12; i++) straight.push({ x: 40 + i * 3, y: 34 });
+  assert.ok(m.aimPath(0, straight));
+  let taken = false;
+  for (let i = 0; i < 300; i++) {
+    m.step(PHYSICS.dt);
+    if (m.ball.owner === blocker.id || m.ball.lastTouch === blocker.id) {
+      taken = true;
+      break;
+    }
+  }
+  assert.ok(taken, 'a defender on the line should be able to cut the ball out');
+});
+
+test('a longer stroke sends a harder ball', () => {
+  const speeds = [];
+  for (const radius of [6, 18, 40]) {
+    const m = makeMatch({ seed: 31 });
+    intoPlay(m);
+    const p = m.teams[0].players[9];
+    p.pos = { x: 30, y: 34 };
+    giveBall(m, p);
+    for (const o of m.players) if (o.id !== p.id) o.pos = { x: 95, y: 64 };
+    const line = [];
+    for (let i = 0; i <= 10; i++) line.push({ x: 30 + (i / 10) * radius, y: 34 });
+    m.aimPath(0, line);
+    m.step(PHYSICS.dt);
+    speeds.push(m.ball.path ? m.ball.path.speed : len(m.ball.vel));
+  }
+  assert.ok(speeds[0] < speeds[1] && speeds[1] < speeds[2], `speeds not increasing: ${speeds.map((s) => s.toFixed(1))}`);
+});
+
+test('a path with fewer than two points is refused', () => {
+  const m = makeMatch({ seed: 31 });
+  intoPlay(m);
+  giveBall(m, m.teams[0].players[9]);
+  assert.equal(m.aimPath(0, []), false);
+  assert.equal(m.aimPath(0, [{ x: 10, y: 10 }]), false);
+  // Points all on top of each other collapse to one and are refused too.
+  assert.equal(m.aimPath(0, [{ x: 10, y: 10 }, { x: 10.01, y: 10.01 }]), false);
+});
+
+test('a drawn path cannot be played without the ball', () => {
+  const m = makeMatch({ seed: 31 });
+  intoPlay(m);
+  giveBall(m, m.teams[1].players[7]);
+  assert.equal(m.aimPath(0, curvePath({ x: 40, y: 34 })), false);
+});
+
+test('a drawn path is clamped to the pitch', () => {
+  const m = makeMatch({ seed: 31 });
+  intoPlay(m);
+  const p = m.teams[0].players[9];
+  p.pos = { x: 50, y: 34 };
+  giveBall(m, p);
+  const wild = [{ x: 50, y: 34 }, { x: 400, y: -900 }, { x: 900, y: 900 }];
+  m.aimPath(0, wild);
+  m.step(PHYSICS.dt);
+  for (const pt of m.ball.path.points) {
+    assert.ok(pt.x > -20 && pt.x < PITCH.length + 20, `path point off the map: ${pt.x}`);
+    assert.ok(pt.y > -20 && pt.y < PITCH.width + 20, `path point off the map: ${pt.y}`);
+  }
+});
+
+test('a match still reaches full time when every ball is a drawn path', () => {
+  const m = makeMatch({ durationMinutes: 1, seed: 33 });
+  let paths = 0;
+  let guard = 0;
+  while (!m.isFinished() && guard++ < 60 * 60 * 8) {
+    if (m.canKick(0)) {
+      const active = m.activePlayerFor(0);
+      const goal = { x: m.teams[0].attackDir > 0 ? PITCH.length : 0, y: PITCH.width / 2 };
+      const line = [];
+      for (let i = 0; i <= 8; i++) {
+        const t = i / 8;
+        line.push({ x: active.pos.x + (goal.x - active.pos.x) * t * 0.5, y: active.pos.y + (goal.y - active.pos.y) * t * 0.5 });
+      }
+      if (m.aimPath(0, line)) paths++;
+    }
+    m.step(PHYSICS.dt);
+    if (m.state === STATES.HALFTIME) m.resumeSecondHalf();
+  }
+  assert.equal(m.state, STATES.FULLTIME);
+  assert.ok(paths > 3, `expected several drawn passes, got ${paths}`);
+  assert.ok(m.players.every((q) => Number.isFinite(q.pos.x)));
+});
