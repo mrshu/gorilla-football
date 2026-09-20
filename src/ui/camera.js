@@ -212,7 +212,10 @@ const SIDE = {
 // the ball in front of them, which is what every sports game means by first
 // person.
 export function frameFirstPerson(camera, player, lookAt, portrait) {
-  const size = (player.character && player.character.look && player.character.look.size) || 1;
+  const rawSize = (player.character && player.character.look && player.character.look.size) || 1;
+  // Keep the eye height in the same real-world scale as the rendered rig and
+  // regulation goal, while preserving a modest height difference by species.
+  const size = 1 + (rawSize - 1) * 0.45;
   const eyeHeight = FIRST_PERSON.eyeHeight * size;
   const f = unit(player.facing, { x: 1, y: 0 });
   const eye = {
@@ -236,7 +239,7 @@ export function frameFirstPerson(camera, player, lookAt, portrait) {
 }
 
 export const FIRST_PERSON = {
-  eyeHeight: 2.35, // metres above the grass, scaled by the character's size
+  eyeHeight: 2.05, // metres above the grass, scaled by the character's size
   behind: 3.2, // eye set back a stride so your own feet and the ball show
   minLook: 17, // never focus closer than this, or the view swings about
   maxLook: 34, // or further than this

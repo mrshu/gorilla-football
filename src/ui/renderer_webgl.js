@@ -184,7 +184,8 @@ export class RendererWebGL {
     const { THREE, scene } = this;
     const post = new THREE.MeshLambertMaterial({ color: '#ffffff' });
     const net = new THREE.MeshLambertMaterial({ color: '#dfe8ef', transparent: true, opacity: 0.22, side: THREE.DoubleSide });
-    const r = 0.07;
+    // Regulation goalposts are roughly 12 cm in diameter.
+    const r = 0.06;
     const hw = PITCH.goalWidth / 2;
     const h = PITCH.goalHeight;
     const d = PITCH.goalDepth;
@@ -256,7 +257,9 @@ export class RendererWebGL {
     if (view) scene.remove(view.group);
     const look = p.character.look;
     const shape = look.shape;
-    const size = look.size * 1.55;
+    // Keep species readable without letting the old look-size range turn
+    // ordinary players into giants next to a regulation goal.
+    const size = 1 + (look.size - 1) * 0.45;
     const S = (n) => n * size;
     const group = new THREE.Group();
 

@@ -310,11 +310,11 @@ export class Renderer3D {
       [{ x, y: hy - hw, z: 0 }, { x, y: hy - hw, z: h }],
       [{ x, y: hy + hw, z: 0 }, { x, y: hy + hw, z: h }],
       [{ x, y: hy - hw, z: h }, { x, y: hy + hw, z: h }],
-      [{ x: back, y: hy - hw, z: 0 }, { x: back, y: hy - hw, z: h * 0.8 }],
-      [{ x: back, y: hy + hw, z: 0 }, { x: back, y: hy + hw, z: h * 0.8 }],
-      [{ x: back, y: hy - hw, z: h * 0.8 }, { x: back, y: hy + hw, z: h * 0.8 }],
-      [{ x, y: hy - hw, z: h }, { x: back, y: hy - hw, z: h * 0.8 }],
-      [{ x, y: hy + hw, z: h }, { x: back, y: hy + hw, z: h * 0.8 }],
+      [{ x: back, y: hy - hw, z: 0 }, { x: back, y: hy - hw, z: h }],
+      [{ x: back, y: hy + hw, z: 0 }, { x: back, y: hy + hw, z: h }],
+      [{ x: back, y: hy - hw, z: h }, { x: back, y: hy + hw, z: h }],
+      [{ x, y: hy - hw, z: h }, { x: back, y: hy - hw, z: h }],
+      [{ x, y: hy + hw, z: h }, { x: back, y: hy + hw, z: h }],
     ];
     // Net as a translucent panel.
     this.fillQuad(
@@ -322,8 +322,8 @@ export class Renderer3D {
       [
         { x, y: hy - hw, z: h },
         { x, y: hy + hw, z: h },
-        { x: back, y: hy + hw, z: h * 0.8 },
-        { x: back, y: hy - hw, z: h * 0.8 },
+        { x: back, y: hy + hw, z: h },
+        { x: back, y: hy - hw, z: h },
       ],
       'rgba(255,255,255,0.13)',
     );
@@ -332,8 +332,8 @@ export class Renderer3D {
       [
         { x: back, y: hy - hw, z: 0 },
         { x: back, y: hy + hw, z: 0 },
-        { x: back, y: hy + hw, z: h * 0.8 },
-        { x: back, y: hy - hw, z: h * 0.8 },
+        { x: back, y: hy + hw, z: h },
+        { x: back, y: hy - hw, z: h },
       ],
       'rgba(255,255,255,0.16)',
     );
@@ -375,7 +375,9 @@ export class Renderer3D {
 
   drawPlayer(ctx, p, s, match, opts) {
     const u = s.scale; // canvas px per world metre at the player's feet
-    const size = p.character.look.size;
+    // Match the WebGL rig's regulation-scale proportions when the browser
+    // falls back to the canvas renderer.
+    const size = 1 + (p.character.look.size - 1) * 0.45;
     const height = 1.85 * size;
     const halfW = 0.42 * size;
     // Shadow

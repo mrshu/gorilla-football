@@ -8,7 +8,10 @@ export const PITCH = Object.freeze({
   width: 68,
   goalWidth: 7.32,
   goalHeight: 2.44,
-  goalDepth: 2.2,
+  // Full-size association-football goal dimensions in metres. Width and
+  // height are IFAB standard; two metres gives the 3D net a believable frame
+  // depth without making it read like an indoor/futsal goal.
+  goalDepth: 2.0,
   penaltyAreaDepth: 16.5,
   penaltyAreaWidth: 40.32,
   goalAreaDepth: 5.5,
