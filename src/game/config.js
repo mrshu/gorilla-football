@@ -37,11 +37,11 @@ export const CONTROL_INFO = [
 const CONTROL_IDS = new Set(Object.values(CONTROL));
 
 // Where the stadium camera sits in whole-team play.
-export const VIEW = Object.freeze({ FIRST: 'first', BROADCAST: 'broadcast' });
+export const VIEW = Object.freeze({ BROADCAST: 'broadcast', FIRST: 'first' });
 
 export const VIEW_INFO = [
+  { id: VIEW.BROADCAST, name: 'Side view', detail: 'A raised camera in the side stand, the way football is televised.' },
   { id: VIEW.FIRST, name: 'First person', detail: 'You look out from the player you are playing through.' },
-  { id: VIEW.BROADCAST, name: 'Broadcast', detail: 'A raised camera that follows the ball down the pitch.' },
 ];
 
 const VIEW_IDS = new Set(Object.values(VIEW));
@@ -62,7 +62,7 @@ export function defaultConfig() {
     durationMinutes: DEFAULT_DURATION_MINUTES,
     seed: (Date.now() % 2147483647) | 0,
     control: CONTROL.AIM,
-    view: VIEW.FIRST,
+    view: VIEW.BROADCAST,
     aiUsesSpecials: false,
     teams: [
       { presetId: TEAM_PRESETS[0].id, jerseyId: TEAM_PRESETS[0].defaultJersey },
@@ -83,7 +83,7 @@ export function normalizeConfig(input) {
   if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 90) throw new Error('Match duration must be between 0 and 90 minutes');
   if (!Array.isArray(cfg.teams) || cfg.teams.length !== 2) throw new Error('Exactly two teams required');
   const control = CONTROL_IDS.has(cfg.control) ? cfg.control : CONTROL.AIM;
-  const view = VIEW_IDS.has(cfg.view) ? cfg.view : VIEW.FIRST;
+  const view = VIEW_IDS.has(cfg.view) ? cfg.view : VIEW.BROADCAST;
 
   const teams = cfg.teams.map((t, i) => {
     const preset = getTeamPreset(t.presetId);

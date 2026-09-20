@@ -5,7 +5,7 @@
 
 import { PITCH, STATES } from '../game/constants.js';
 import { clamp } from '../game/vec.js';
-import { Camera, frameBall, frameFirstPerson } from './camera.js';
+import { Camera, frameSideline, frameFirstPerson, sidelinePose, shootingPose, isInShootingRange, applyPose, blendPose } from './camera.js';
 
 const SKY_TOP = '#0f2233';
 const SKY_HORIZON = '#3d5f74';
@@ -44,9 +44,22 @@ export class Renderer3D {
     this.camera.setViewport(layout.w, layout.h);
     if (layout.firstPerson && layout.eyePlayer) {
       frameFirstPerson(this.camera, layout.eyePlayer, this.smoothLook(layout, dt), layout.portrait);
-    } else {
-      frameBall(this.camera, this.smoothBall, layout.viewAttackDir, layout.portrait);
+      this.shotBlend = 0;
+      return;
     }
+    // Drop in behind the player on the ball once they are in range of goal,
+    // easing between the two so it reads as a camera move, not a cut.
+    const shooter = layout.shooter;
+    const want = shooter ? 1 : 0;
+    const rate = 1 - Math.exp(-3.2 * Math.max(0, Math.min(dt, 0.2)));
+    this.shotBlend = (this.shotBlend || 0) + (want - (this.shotBlend || 0)) * rate;
+    const wide = sidelinePose(this.smoothBall, layout.viewAttackDir, layout.portrait);
+    if (this.shotBlend < 0.01 || !layout.shotAnchor) {
+      applyPose(this.camera, wide);
+      return;
+    }
+    const close = shootingPose(layout.shotAnchor.carrier, layout.shotAnchor.goal, layout.portrait);
+    applyPose(this.camera, blendPose(wide, close, this.shotBlend));
   }
 
   // Prime the camera so input taken before the first frame is drawn still
@@ -72,6 +85,7 @@ export class Renderer3D {
     const ctx = this.ctx;
     this.updateCamera(match, layout, opts.dt || 0);
     ctx.clearRect(0, 0, layout.w, layout.h);
+    this.firstPersonView = Boolean(layout.firstPerson);
     this.drawSky(ctx, layout);
     this.drawStands(ctx, layout);
     this.drawPitch(ctx, layout);
@@ -126,7 +140,7 @@ export class Renderer3D {
     // corners and the bowl closes up instead of leaving gaps of open ground.
     const over = gap + 26;
     const sides = [
-      { inner: [{ x: -over, y: -gap }, { x: L + over, y: -gap }], out: { x: 0, y: -1 } },
+      { inner: [{ x: -over, y: -gap }, { x: L + over, y: -gap }], out: { x: 0, y: -1 }, skipWhenWide: true },
       { inner: [{ x: -over, y: W + gap }, { x: L + over, y: W + gap }], out: { x: 0, y: 1 } },
       { inner: [{ x: -gap, y: -over }, { x: -gap, y: W + over }], out: { x: -1, y: 0 } },
       { inner: [{ x: L + gap, y: -over }, { x: L + gap, y: W + over }], out: { x: 1, y: 0 } },
@@ -136,6 +150,9 @@ export class Renderer3D {
     // would vanish entirely; segmenting drops only the part actually behind.
     const SEGMENTS = 10;
     for (const whole of sides) {
+      // The broadcast camera sits in the near touchline stand, so it is not
+      // drawn there: you never see the stand you are filming from.
+      if (whole.skipWhenWide && !this.firstPersonView) continue;
       for (let seg = 0; seg < SEGMENTS; seg++) {
         const t0 = seg / SEGMENTS;
         const t1 = (seg + 1) / SEGMENTS;
@@ -524,6 +541,44 @@ export class Renderer3D {
       ctx.stroke();
       ctx.restore();
     }
+  }
+
+  // The yellow tick: where the game reckons the ball should go next. Drawn on
+  // the overlay so it looks the same under either pitch renderer.
+  drawSuggestion(ctx, suggestion, dt) {
+    if (!suggestion) return;
+    const s = this.camera.project({ x: suggestion.point.x, y: suggestion.point.y, z: 1.4 });
+    if (!s.visible) return;
+    this.suggestPulse = (this.suggestPulse || 0) + (dt || 0);
+    const pulse = 1 + Math.sin(this.suggestPulse * 4) * 0.08;
+    const r = Math.max(9, Math.min(26, s.scale * 0.55)) * pulse;
+    ctx.save();
+    // Soft glow, then the disc.
+    const glow = ctx.createRadialGradient(s.x, s.y, r * 0.2, s.x, s.y, r * 1.9);
+    glow.addColorStop(0, 'rgba(255,230,60,0.55)');
+    glow.addColorStop(1, 'rgba(255,230,60,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r * 1.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = suggestion.kind === 'shot' ? '#ff8a3d' : '#ffe33d';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = Math.max(1.5, r * 0.1);
+    ctx.stroke();
+    // A tick inside it.
+    ctx.strokeStyle = '#1b1b1b';
+    ctx.lineWidth = Math.max(2, r * 0.22);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(s.x - r * 0.42, s.y + r * 0.02);
+    ctx.lineTo(s.x - r * 0.1, s.y + r * 0.34);
+    ctx.lineTo(s.x + r * 0.45, s.y - r * 0.36);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawFloats(ctx, layout, dt) {

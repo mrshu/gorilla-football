@@ -63,6 +63,8 @@ export function computeAimLayout(w, h, humanCount, viewAttackDir, firstPerson = 
     firstPerson,
     eyePlayer: null, // filled in each frame by the app
     lookAt: null,
+    shooter: false, // true while the camera should be in close behind a shot
+    shotAnchor: null,
     zones,
     hud,
     controls: [],

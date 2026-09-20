@@ -5,6 +5,7 @@ import { Match } from '../game/match.js';
 import { normalizeConfig, defaultConfig, humanCount, MODES, CONTROL, VIEW } from '../game/config.js';
 import { PHYSICS, STATES } from '../game/constants.js';
 import { computeLayout, computeAimLayout } from './layout.js';
+import { isInShootingRange } from './camera.js';
 import { Renderer } from './renderer.js';
 import { Renderer3D } from './renderer3d.js';
 import { InputManager } from './input.js';
@@ -143,11 +144,28 @@ export class App {
     return Boolean(this.match && this.match.aimControl);
   }
 
+  // The camera goes close when your player has the ball within range of goal.
+  updateShooter(player) {
+    const m = this.match;
+    const carrier = m.ball.owner !== null ? m.getPlayer(m.ball.owner) : null;
+    const mine = carrier && player && carrier.id === player.id && !carrier.isGK;
+    if (!mine || m.state !== STATES.PLAY) {
+      this.layout.shooter = false;
+      return;
+    }
+    const goal = m.goalTargetFor(carrier);
+    this.layout.shooter = isInShootingRange(carrier, goal);
+    if (this.layout.shooter) this.layout.shotAnchor = { carrier, goal };
+  }
+
   // Whose eyes the first-person camera is looking through, and at what.
+  // Also decides whether the broadcast camera should drop in behind a player
+  // who has carried the ball into range of goal.
   updateEye() {
     if (!this.layout || !this.match) return;
     const player = this.match.activePlayerFor(0);
     this.layout.eyePlayer = player || null;
+    this.updateShooter(player);
     if (!player) {
       this.layout.lookAt = { ...this.match.ball.pos };
       return;
@@ -423,8 +441,11 @@ export class App {
           // Reuse the canvas renderer's overlay drawing, pointed at the same
           // camera the WebGL scene is using so the two line up exactly.
           this.renderer3d.camera = this.webgl.camera;
+          this.renderer3d.drawSuggestion(hud, this.match.suggestedTarget(0), dt);
           if (aims[0]) this.renderer3d.drawAim(hud, this.match, this.layout, { aim: aims[0] });
           this.renderer3d.drawFloats(hud, this.layout, dt);
+        } else {
+          this.renderer3d.drawSuggestion(hud, this.match.suggestedTarget(0), dt);
         }
         drawHud(hud, this.match, this.layout, { hint: this.aimHint() });
       }
@@ -450,7 +471,8 @@ export class App {
     const m = this.match;
     if (m.state === STATES.GOAL) return null;
     if (m.canKick(0)) {
-      return m.state === STATES.PLAY ? 'Tap to move · draw to pass or shoot' : 'Draw to take the restart';
+      if (m.state !== STATES.PLAY) return 'Draw to take the restart';
+      return this.layout.shooter ? 'In range · draw your shot' : 'Tap to move · draw to pass or shoot';
     }
     const owner = m.ball.owner !== null ? m.getPlayer(m.ball.owner) : null;
     if (owner && owner.team !== (m.config.humans[0]?.team ?? 0)) return 'Tap where to run · tap them to tackle';

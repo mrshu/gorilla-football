@@ -125,40 +125,76 @@ export class Camera {
   }
 }
 
-// A broadcast camera that sits behind the play and looks towards the goal the
-// viewing team is attacking, so "forward" on screen is always forward on the
-// pitch. `attackDir` is +1 when that team attacks x = PITCH.length.
-export function frameBall(camera, ballPos, attackDir, portrait) {
-  const v = portrait ? FRAME.portrait : FRAME.landscape;
+// The broadcast camera: up in the stand on one touchline, looking across the
+// pitch, panning along the halfway line as play moves. The pitch length runs
+// across the screen, which is how football is filmed and how you can read
+// both penalty areas at once.
+export function frameSideline(camera, ballPos, attackDir, portrait) {
+  return applyPose(camera, sidelinePose(ballPos, attackDir, portrait));
+}
+
+export function sidelinePose(ballPos, attackDir, portrait) {
+  const v = portrait ? SIDE.portrait : SIDE.landscape;
+  const cx = PITCH.length / 2;
   const cy = PITCH.width / 2;
-  const bx = ballPos.x;
-  const by = ballPos.y;
-  // The camera sits behind the ball and looks past it towards the goal being
-  // attacked. It tracks the ball sideways less than fully, which keeps the
-  // horizon steady without ever letting the ball slide out of frame.
-  const eye = {
-    x: bx - v.back * attackDir,
-    y: cy + (by - cy) * v.eyeTrack,
-    z: v.height,
+  // Pan only part of the way with the ball so the pitch does not slide about,
+  // and drift a little across the width so play on the near touchline does
+  // not fall off the bottom of a frame that is deliberately cropped there.
+  const bx = cx + (ballPos.x - cx) * v.track;
+  const dy = (ballPos.y - cy) * v.trackY;
+  const eye = { x: bx, y: -v.distance + dy, z: v.height };
+  const target = { x: bx + attackDir * v.lead, y: PITCH.width * v.aimAcross + dy, z: 0 };
+  return { eye, target, fov: v.fov };
+}
+
+// Close in behind the player on the ball, looking at the goal they are
+// attacking. The game drops into this once they are in range, so a shot is
+// lined up from roughly where the striker is looking.
+export function shootingPose(carrier, goal, portrait) {
+  const v = portrait ? SHOT.portrait : SHOT.landscape;
+  const to = { x: goal.x - carrier.pos.x, y: goal.y - carrier.pos.y };
+  const l = Math.hypot(to.x, to.y) || 1;
+  const dir = { x: to.x / l, y: to.y / l };
+  return {
+    eye: {
+      x: carrier.pos.x - dir.x * v.behind,
+      y: carrier.pos.y - dir.y * v.behind,
+      z: v.height,
+    },
+    target: { x: goal.x, y: goal.y, z: v.aimHeight },
+    fov: v.fov,
   };
-  const target = {
-    x: bx + v.lookAhead * attackDir,
-    y: cy + (by - cy) * v.targetTrack,
-    z: 0,
-  };
-  camera.setView(eye, target, v.fov);
+}
+
+export function isInShootingRange(carrier, goal) {
+  const d = Math.hypot(goal.x - carrier.pos.x, goal.y - carrier.pos.y);
+  return d < SHOT.range;
+}
+
+const SHOT = {
+  range: 32, // metres from goal at which the camera drops in behind
+  landscape: { behind: 11, height: 4.6, aimHeight: 1.4, fov: 46 },
+  portrait: { behind: 13, height: 5.4, aimHeight: 1.4, fov: 62 },
+};
+
+export function applyPose(camera, pose) {
+  camera.setView(pose.eye, pose.target, pose.fov);
   return camera;
 }
 
-// Tuned so the ball stays comfortably on screen from any point on the pitch;
-// `test/camera.test.js` checks that across a grid of ball positions.
-// `eyeTrack` and `targetTrack` being close keeps the camera's axis nearly
-// parallel to the pitch, so the touchlines stay square on screen instead of
-// swinging about as the ball moves across. A small difference is left in for
-// a bit of life.
-const FRAME = {
-  portrait: { back: 58, lookAhead: 32, height: 34, fov: 56, eyeTrack: 0.6, targetTrack: 0.7 },
-  landscape: { back: 58, lookAhead: 32, height: 34, fov: 46, eyeTrack: 0.6, targetTrack: 0.7 },
+// Ease between two camera poses, so switching views is a move rather than a cut.
+export function blendPose(a, b, t) {
+  const mix = (p, q) => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t, z: p.z + (q.z - p.z) * t });
+  return { eye: mix(a.eye, b.eye), target: mix(a.target, b.target), fov: a.fov + (b.fov - a.fov) * t };
+}
+
+// Fitted by a search over the parameter space that required the ball to stay
+// comfortably inside the frame from every point on the pitch, and both
+// touchlines to be visible, at four screen sizes. `test/camera.test.js`
+// re-checks it.
+const SIDE = {
+  landscape: { distance: 6, height: 18, fov: 62, track: 0.4, trackY: 0.45, aimAcross: 0.4, lead: 0 },
+  portrait: { distance: 18, height: 44, fov: 70, track: 1, trackY: 0, aimAcross: 0.4, lead: 8 },
 };
 
 // First person: you look out from the player you are playing through, at

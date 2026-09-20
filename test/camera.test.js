@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Camera, frameBall } from '../src/ui/camera.js';
+import { Camera, frameSideline } from '../src/ui/camera.js';
 import { PITCH } from '../src/game/constants.js';
 
 function cam(w = 400, h = 800) {
@@ -87,26 +87,52 @@ test('a drag maps to a ground direction that points the same way on screen', () 
   }
 });
 
-test('the follow camera stays behind the ball and looks towards the attacked goal', () => {
+test('the broadcast camera stands in the side stand looking across the pitch', () => {
   for (const attackDir of [1, -1]) {
     const c = cam();
-    frameBall(c, { x: 52, y: 34 }, attackDir, true);
-    // The camera is behind the ball relative to the attack direction.
-    assert.ok((52 - c.eye.x) * attackDir > 0, 'camera should sit behind the ball');
-    // And it looks forwards.
-    assert.ok((c.target.x - c.eye.x) * attackDir > 0, 'camera should look forwards');
-    assert.ok(c.eye.z > 10, 'camera should be raised');
+    frameSideline(c, { x: 52, y: 34 }, attackDir, true);
+    assert.ok(c.eye.y < 0, 'camera should be outside one touchline');
+    assert.ok(c.eye.z > 10, 'camera should be raised into the stand');
+    assert.ok(c.target.y > 0, 'camera should look across the pitch');
+    // Looking across the width, not along the length.
+    const dir = { x: c.target.x - c.eye.x, y: c.target.y - c.eye.y };
+    assert.ok(Math.abs(dir.y) > Math.abs(dir.x), 'the view should run across the pitch');
   }
 });
 
-test('the follow camera keeps the ball on screen from anywhere on the pitch', () => {
+test('the pitch runs across the screen, not away from the camera', () => {
+  const c = cam(932, 430);
+  frameSideline(c, { x: 52, y: 34 }, 1, false);
+  const left = c.project({ x: 10, y: 34, z: 0 });
+  const right = c.project({ x: 95, y: 34, z: 0 });
+  assert.ok(left.visible && right.visible);
+  // Both ends of the pitch are on screen and separated horizontally.
+  assert.ok(Math.abs(right.x - left.x) > 400, 'the length should span the screen');
+  assert.ok(Math.abs(right.y - left.y) < 120, 'the length should run roughly level');
+});
+
+test('the far touchline sits near the top and grass fills the frame', () => {
+  for (const [w, h, portrait] of [[932, 430, false], [430, 932, true]]) {
+    const c = cam(w, h);
+    frameSideline(c, { x: 52, y: 34 }, 1, portrait);
+    const far = c.project({ x: 52, y: PITCH.width, z: 0 });
+    assert.ok(far.visible, `${w}x${h}: far touchline should be in shot`);
+    assert.ok(far.y > 0 && far.y < h * 0.3, `${w}x${h}: far touchline at ${(far.y / h).toFixed(2)} of the screen`);
+    // Everything below it, down the middle of the picture, is pitch.
+    const mid = c.screenToGround(w / 2, h * 0.75);
+    assert.ok(mid, `${w}x${h}: the lower frame should be grass`);
+    assert.ok(mid.y > -12 && mid.y < PITCH.width, `${w}x${h}: lower frame is off the pitch at y=${mid.y.toFixed(1)}`);
+  }
+});
+
+test('the broadcast camera keeps the ball on screen from anywhere on the pitch', () => {
   const sizes = [[400, 800, true], [430, 932, true], [932, 430, false], [844, 390, false]];
   for (const [w, h, portrait] of sizes) {
     for (const attackDir of [1, -1]) {
       for (let x = 0; x <= PITCH.length; x += 5) {
         for (let y = 0; y <= PITCH.width; y += 4) {
           const c = cam(w, h);
-          frameBall(c, { x, y }, attackDir, portrait);
+          frameSideline(c, { x, y }, attackDir, portrait);
           const p = c.project({ x, y, z: 0 });
           assert.ok(p.visible, `${w}x${h}: ball at ${x},${y} dir ${attackDir} is behind the camera`);
           assert.ok(p.x >= 0 && p.x <= w, `${w}x${h}: ball at ${x},${y} off screen (x=${p.x.toFixed(0)})`);
@@ -117,12 +143,12 @@ test('the follow camera keeps the ball on screen from anywhere on the pitch', ()
   }
 });
 
-test('both goals and the halfway line stay in front of the camera', () => {
-  for (const attackDir of [1, -1]) {
-    const c = cam(430, 932);
-    frameBall(c, { x: PITCH.length / 2, y: PITCH.width / 2 }, attackDir, true);
-    const goal = c.project({ x: attackDir > 0 ? PITCH.length : 0, y: PITCH.width / 2, z: 0 });
-    assert.ok(goal.visible, 'the attacked goal should be in view from the halfway line');
+test('both goals are in view from the halfway line', () => {
+  const c = cam(932, 430);
+  frameSideline(c, { x: PITCH.length / 2, y: PITCH.width / 2 }, 1, false);
+  for (const x of [0, PITCH.length]) {
+    const g = c.project({ x, y: PITCH.width / 2, z: 0 });
+    assert.ok(g.visible, `goal at x=${x} should be in view`);
   }
 });
 
@@ -189,4 +215,54 @@ test('the ground under the crosshair unprojects back to the pitch', () => {
   const g = c.screenToGround(215, 700);
   assert.ok(g, 'the lower half of the screen should be grass');
   assert.ok(g.x > 25 && g.x < 105, `unprojected to ${g.x}, off the pitch`);
+});
+
+// ------------------------------------------------------------ shooting view
+
+import { shootingPose, isInShootingRange, blendPose, sidelinePose } from '../src/ui/camera.js';
+
+test('the shooting camera sits behind the player, looking at the goal', () => {
+  const goal = { x: PITCH.length, y: PITCH.width / 2 };
+  const carrier = { pos: { x: PITCH.length - 20, y: 30 } };
+  const pose = shootingPose(carrier, goal, false);
+  // Behind the carrier, on the far side from the goal.
+  assert.ok(pose.eye.x < carrier.pos.x, 'camera should be behind the carrier');
+  assert.ok(pose.eye.z > 2 && pose.eye.z < 9, `camera should be low, got ${pose.eye.z}`);
+  assert.ok(Math.abs(pose.target.x - goal.x) < 0.01, 'it should look at the goal');
+  // The carrier is between the camera and the goal.
+  const total = Math.hypot(goal.x - pose.eye.x, goal.y - pose.eye.y);
+  const toCarrier = Math.hypot(carrier.pos.x - pose.eye.x, carrier.pos.y - pose.eye.y);
+  assert.ok(toCarrier < total, 'the carrier should be in shot, in front of the camera');
+});
+
+test('the shooting camera only comes in when near enough to goal', () => {
+  const goal = { x: PITCH.length, y: PITCH.width / 2 };
+  assert.ok(isInShootingRange({ pos: { x: PITCH.length - 15, y: 34 } }, goal));
+  assert.ok(!isInShootingRange({ pos: { x: 40, y: 34 } }, goal));
+});
+
+test('the shooting view actually frames the goal and the shooter', () => {
+  const goal = { x: PITCH.length, y: PITCH.width / 2 };
+  const carrier = { pos: { x: PITCH.length - 18, y: 26 } };
+  for (const [w, h, portrait] of [[932, 430, false], [430, 932, true]]) {
+    const c = cam(w, h);
+    const pose = shootingPose(carrier, goal, portrait);
+    c.setView(pose.eye, pose.target, pose.fov);
+    const g = c.project({ x: goal.x, y: goal.y, z: 1.2 });
+    const s = c.project({ x: carrier.pos.x, y: carrier.pos.y, z: 0.9 });
+    assert.ok(g.visible && g.x > 0 && g.x < w && g.y > 0 && g.y < h, `${w}x${h}: goal out of shot`);
+    assert.ok(s.visible && s.x > 0 && s.x < w && s.y > 0 && s.y < h, `${w}x${h}: shooter out of shot`);
+  }
+});
+
+test('blending between camera poses moves smoothly from one to the other', () => {
+  const wide = sidelinePose({ x: 80, y: 34 }, 1, false);
+  const close = shootingPose({ pos: { x: 90, y: 34 } }, { x: PITCH.length, y: 34 }, false);
+  const start = blendPose(wide, close, 0);
+  const end = blendPose(wide, close, 1);
+  const mid = blendPose(wide, close, 0.5);
+  assert.deepEqual(start.eye, wide.eye);
+  assert.deepEqual(end.eye, close.eye);
+  assert.ok(mid.eye.z > Math.min(wide.eye.z, close.eye.z) && mid.eye.z < Math.max(wide.eye.z, close.eye.z));
+  assert.ok(mid.fov > Math.min(wide.fov, close.fov) - 0.01 && mid.fov < Math.max(wide.fov, close.fov) + 0.01);
 });

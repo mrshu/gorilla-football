@@ -621,6 +621,46 @@ export class Match {
     return true;
   }
 
+  // The best place to put the ball next, for the marker on the pitch. It is
+  // the same ranking the AI passes by, so the hint never disagrees with what
+  // a computer-controlled player would have done. Null when it is not your
+  // ball to play.
+  suggestedTarget(humanIndex) {
+    if (!this.aimControl || !this.canKick(humanIndex)) return null;
+    const carrier = this.state === STATES.PLAY
+      ? (this.ball.owner !== null ? this.getPlayer(this.ball.owner) : null)
+      : (this.setPiece ? this.getPlayer(this.setPiece.takerId) : null);
+    if (!carrier) return null;
+    const setPiece = this.setPiece ? this.setPiece.kind : undefined;
+    const ranked = this.rankPassTargets(carrier, null, { setPiece });
+    const best = ranked.length ? ranked[0] : null;
+
+    // If there is a clear sight of goal from close in, that beats any pass.
+    const goal = this.goalTargetFor(carrier);
+    const dGoal = dist(carrier.pos, goal);
+    if (dGoal < 18 + carrier.stats.shotPower && this.laneIsClear(carrier, goal)) {
+      return { kind: 'shot', point: goal, playerId: null };
+    }
+    if (!best) return null;
+    return { kind: 'pass', point: { ...best.player.pos }, playerId: best.player.id };
+  }
+
+  // Is there a clear run from this player to that point?
+  laneIsClear(p, point) {
+    const to = sub(point, p.pos);
+    const d = len(to);
+    if (d < 1e-6) return true;
+    const dir = scale(to, 1 / d);
+    for (const o of this.opponentsOf(p)) {
+      if (o.isGK) continue;
+      const rel = sub(o.pos, p.pos);
+      const along = dot(rel, dir);
+      if (along <= 0.5 || along >= d) continue;
+      if (Math.abs(rel.x * dir.y - rel.y * dir.x) < 1.3) return false;
+    }
+    return true;
+  }
+
   // The standing order for this player, or null. Cleared once they arrive.
   moveOrderFor(player) {
     for (let i = 0; i < this.moveOrders.length; i++) {

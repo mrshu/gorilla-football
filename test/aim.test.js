@@ -615,3 +615,54 @@ test('a match still reaches full time when every ball is a drawn path', () => {
   assert.ok(paths > 3, `expected several drawn passes, got ${paths}`);
   assert.ok(m.players.every((q) => Number.isFinite(q.pos.x)));
 });
+
+// -------------------------------------------------------- suggested target
+
+test('the suggested target names a teammate worth passing to', () => {
+  const m = makeMatch({ seed: 44 });
+  intoPlay(m);
+  const p = m.teams[0].players[6];
+  p.pos = { x: 45, y: 34 };
+  giveBall(m, p);
+  const hint = m.suggestedTarget(0);
+  assert.ok(hint, 'there should be a suggestion while you have the ball');
+  assert.equal(hint.kind, 'pass');
+  const mate = m.getPlayer(hint.playerId);
+  assert.equal(mate.team, p.team, 'the suggestion must be a teammate');
+  assert.notEqual(mate.id, p.id, 'it should not suggest passing to yourself');
+  assert.ok(dist(hint.point, mate.pos) < 0.01, 'the marker sits on that player');
+});
+
+test('with a clear sight of goal the suggestion is to shoot', () => {
+  const m = makeMatch({ seed: 44 });
+  intoPlay(m);
+  const p = m.teams[0].players[9];
+  const goalX = m.teams[0].attackDir > 0 ? PITCH.length : 0;
+  p.pos = { x: goalX - m.teams[0].attackDir * 12, y: PITCH.width / 2 };
+  giveBall(m, p);
+  // Nobody in the way.
+  for (const o of m.teams[1].players) if (!o.isGK) o.pos = { x: goalX - m.teams[0].attackDir * 60, y: 4 };
+  const hint = m.suggestedTarget(0);
+  assert.ok(hint);
+  assert.equal(hint.kind, 'shot');
+  assert.ok(dist(hint.point, { x: goalX, y: PITCH.width / 2 }) < 3, 'the marker should be on the goal');
+});
+
+test('there is no suggestion when the ball is not yours', () => {
+  const m = makeMatch({ seed: 44 });
+  intoPlay(m);
+  giveBall(m, m.teams[1].players[7]);
+  assert.equal(m.suggestedTarget(0), null);
+  m.ball.owner = null;
+  assert.equal(m.suggestedTarget(0), null);
+});
+
+test('the suggestion never points at an offside teammate', () => {
+  const m = makeMatch({ seed: 44 });
+  intoPlay(m);
+  const p = m.teams[0].players[6];
+  p.pos = { x: 50, y: 34 };
+  giveBall(m, p);
+  for (const t of m.teams[0].players) t.offsideFlag = t.id !== p.id;
+  assert.equal(m.suggestedTarget(0), null, 'with every teammate offside there is nobody to point at');
+});

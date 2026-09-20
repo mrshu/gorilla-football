@@ -7,7 +7,7 @@
 // y-up, so the mapping is (x, z, -y), which preserves handedness.
 
 import { PITCH } from '../game/constants.js';
-import { Camera, frameBall, frameFirstPerson } from './camera.js';
+import { Camera, frameSideline, frameFirstPerson, sidelinePose, shootingPose, isInShootingRange, applyPose, blendPose } from './camera.js';
 import { pitchTexture, crowdTexture, ballTexture } from './textures.js';
 
 const toThree = (THREE, x, y, z = 0) => new THREE.Vector3(x, z, -y);
@@ -104,7 +104,8 @@ export class RendererWebGL {
     const track = 7; // clear space between touchline and first row
     const over = 24; // how far the side stands run past the goal lines
 
-    const tier = (w, h, d, cx, cy, baseY, repeatX) => {
+    this.nearStand = [];
+    const tier = (w, h, d, cx, cy, baseY, repeatX, near = false) => {
       const mat = new THREE.MeshLambertMaterial({ map: crowd.clone() });
       mat.map.wrapS = THREE.RepeatWrapping;
       mat.map.wrapT = THREE.RepeatWrapping;
@@ -118,6 +119,7 @@ export class RendererWebGL {
       const lip = new THREE.Mesh(new THREE.BoxGeometry(w * 1.02, 1.4, d * 1.02), concrete);
       lip.position.set(cx, baseY + h + 0.7, -cy);
       scene.add(lip);
+      if (near) this.nearStand.push(m, lip);
       return m;
     };
 
@@ -128,8 +130,11 @@ export class RendererWebGL {
     // Touchline stands, at world y below 0 and above W.
     for (const sign of [-1, 1]) {
       const y0 = sign < 0 ? -track : W + track;
-      tier(sideLen, 9, d1, L / 2, y0 + sign * d1 / 2, 1.5, sideLen / 32);
-      tier(sideLen, 11, d2, L / 2, y0 + sign * (d1 + d2 / 2), 9.5, sideLen / 32);
+      // The broadcast camera films from the stand on the near touchline, so
+      // that one is hidden in that view: you never see the stand you are in.
+      const near = sign < 0;
+      tier(sideLen, 9, d1, L / 2, y0 + sign * d1 / 2, 1.5, sideLen / 32, near);
+      tier(sideLen, 11, d2, L / 2, y0 + sign * (d1 + d2 / 2), 9.5, sideLen / 32, near);
     }
     // Stands behind each goal.
     for (const sign of [-1, 1]) {
@@ -314,9 +319,22 @@ export class RendererWebGL {
     this.camera.setViewport(layout.w, layout.h);
     if (layout.firstPerson && layout.eyePlayer) {
       frameFirstPerson(this.camera, layout.eyePlayer, this.smoothLook(layout, dt), layout.portrait);
-    } else {
-      frameBall(this.camera, this.smoothBall, layout.viewAttackDir, layout.portrait);
+      this.shotBlend = 0;
+      return;
     }
+    // Drop in behind the player on the ball once they are in range of goal,
+    // easing between the two so it reads as a camera move, not a cut.
+    const shooter = layout.shooter;
+    const want = shooter ? 1 : 0;
+    const rate = 1 - Math.exp(-3.2 * Math.max(0, Math.min(dt, 0.2)));
+    this.shotBlend = (this.shotBlend || 0) + (want - (this.shotBlend || 0)) * rate;
+    const wide = sidelinePose(this.smoothBall, layout.viewAttackDir, layout.portrait);
+    if (this.shotBlend < 0.01 || !layout.shotAnchor) {
+      applyPose(this.camera, wide);
+      return;
+    }
+    const close = shootingPose(layout.shotAnchor.carrier, layout.shotAnchor.goal, layout.portrait);
+    applyPose(this.camera, blendPose(wide, close, this.shotBlend));
     const { THREE } = this;
     const e = this.camera.eye;
     const t = this.camera.target;
@@ -357,6 +375,8 @@ export class RendererWebGL {
   draw(match, layout, opts = {}) {
     const { THREE } = this;
     this.updateCamera(match, layout, opts.dt || 0);
+    const hideNear = !layout.firstPerson;
+    for (const m of this.nearStand) m.visible = !hideNear;
 
     for (const p of match.players) {
       const view = this.playerView(p);
