@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d2417">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Gorilla Football</title>
+<link rel="stylesheet" href="src/ui/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%232f7d3a'/><circle cx='16' cy='16' r='6' fill='white'/></svg>">
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="overlay" class="overlay"></div>
+<div id="rotate-hint">Rotate for a bigger pitch</div>
+<script type="module">
+  import { App } from './src/ui/app.js';
+  const app = new App({ canvas: document.getElementById('game'), overlay: document.getElementById('overlay') });
+  window.__app = app;
+  // Suppress double-tap zoom / pull-to-refresh gestures on the playfield.
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  document.addEventListener('touchmove', (e) => { if (e.target === document.getElementById('game')) e.preventDefault(); }, { passive: false });
+</script>
+</body>
+</html>
