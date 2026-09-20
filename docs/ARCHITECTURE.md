@@ -104,7 +104,17 @@ chosen by a search over the parameter space that required the ball to project
 inside the canvas from every point on the pitch at four screen sizes, and
 `test/camera.test.js` re-checks that on every run.
 
-`src/ui/renderer3d.js` paints back to front: sky, surrounding ground, the four
+There are two renderers behind the same interface. `RendererWebGL` builds a
+three.js scene: a textured pitch plane, a stadium of boxes carrying a generated
+crowd texture, goal frames with translucent nets, a group of meshes per player
+and a shadowed ball. It does not own a camera of its own; it copies the `Camera`
+above into a `THREE.PerspectiveCamera` each frame, mapping world (x, y, z) to
+three (x, z, -y), which preserves handedness and keeps world up as three up.
+Because both cameras agree, the HUD and the drawn line, painted on a separate 2D
+canvas stacked above, line up exactly with the rendered scene.
+
+`Renderer3D` is the fallback used when three.js cannot be fetched. It paints
+back to front: sky, surrounding ground, the four
 terraces, the grass and its lines, both goals, then players and the ball sorted
 by depth. Straight pitch lines are drawn as a chain of short segments so
 perspective bends them correctly. Quads whose corners fall behind the camera are

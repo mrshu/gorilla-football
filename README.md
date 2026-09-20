@@ -1,10 +1,15 @@
 # Gorilla Football
 
 A mobile-first 11-a-side arcade football game for one or two players on a
-single phone or tablet, played from a 3D stadium camera. Plain HTML5 canvas
-and ES modules: no build step, no dependencies, no network calls, and no 3D
-library. The perspective is a hand-rolled projection, so the whole thing is
-still a few files you can read.
+single phone or tablet, played from a 3D stadium camera. ES modules with no
+build step and nothing to install.
+
+Rendering has two paths. By default it loads three.js from a CDN and renders
+the match in WebGL, with real lighting, shadows and a textured pitch. If that
+script cannot be reached, which is the point of serving the game off your own
+machine, it falls back to a hand-rolled perspective projection on a 2D canvas
+that needs no network at all. Both paths use the same camera maths, so the game
+plays identically either way.
 
 You run the whole team, not one striker, with one finger: **tap to dribble, or
 draw a line and the ball follows it**. Curve the line around a defender and the
@@ -12,7 +17,7 @@ ball curves with it. There is no separate pass and shoot button.
 
 ![A match in landscape](docs/screenshots/match.png)
 
-<img src="docs/screenshots/stadium-portrait.png" width="240" alt="The stadium camera in portrait"> <img src="docs/screenshots/aiming.png" width="240" alt="Aiming: the guide shows where the ball will go"> <img src="docs/screenshots/setup.png" width="240" alt="Pre-match setup">
+<img src="docs/screenshots/drawing.png" width="240" alt="Drawing the pass: the line on the grass is the route the ball will take"> <img src="docs/screenshots/setup.png" width="240" alt="Pre-match setup"> <img src="docs/screenshots/coop-portrait.png" width="240" alt="Two-player co-op">
 
 ## Run it
 
@@ -190,7 +195,10 @@ src/game/match.js       the simulation: physics, possession, restarts, flow
 src/game/ai.js          outfield AI
 src/game/goalkeeper.js  goalkeeper AI
 src/ui/camera.js        perspective camera: projection and unprojection
-src/ui/renderer3d.js    3D stadium rendering (default)
+src/ui/renderer_webgl.js  WebGL stadium rendering (three.js, default)
+src/ui/textures.js      generated pitch, crowd and ball textures
+src/ui/three-loader.js  fetches three.js, resolving to null on failure
+src/ui/renderer3d.js    canvas stadium rendering (offline fallback)
 src/ui/aiminput.js      hold-aim-release touch input
 src/ui/hud.js           scoreboard, clock, cards, touch hint
 src/ui/layout.js        screen layout and touch-control geometry
@@ -262,11 +270,20 @@ asked about:
   with one touch; everyone moves themselves. The two older styles, which give
   you a single player from a top-down view, are kept as setup options rather
   than deleted, because they work and they exercise the same simulation.
-- **3D without a 3D library.** The perspective is a look-at basis and a divide
-  by depth in `src/ui/camera.js`, painted back-to-front on the same 2D canvas.
-  Pulling in Three.js would look better but would add a CDN dependency to a game
-  whose whole point is that it opens instantly over your own Wi-Fi with nothing
-  installed.
+- **WebGL by preference, canvas as a guarantee.** three.js makes the match look
+  far better, but it comes off a CDN, and a game you serve from your own laptop
+  should not stop working when the internet does. So the WebGL renderer is an
+  upgrade layered over a projection renderer that always works, and the loader
+  resolves to null rather than throwing if the script does not arrive.
+- **Not Unity.** Unity needs an editor and a build pipeline, and would turn a
+  directory you can open with any static file server into a multi-megabyte WASM
+  bundle. WebGL through three.js gets the same look in the browser with nothing
+  to install.
+- **The input camera is the source of truth.** `src/ui/camera.js` owns the
+  projection and unprojection used to turn a finger stroke into a line on the
+  grass, and its eye, target and field of view are mirrored into the three.js
+  camera. That keeps the tested maths in one place and guarantees the line you
+  draw lands where the rendered pitch actually is.
 - **The camera runs on rails down the pitch.** It tracks the ball sideways only
   partially and its axis stays nearly parallel to the touchlines, so the pitch
   does not swing about as the ball moves. The parameters were picked by a search
@@ -328,7 +345,11 @@ bugs:
 - **The stadium camera does not show the whole pitch at once.** It follows the
   ball, which is what a 3D football game does; the original top-down styles
   still show everything if you want that.
-- **Players are drawn as simple stacked shapes**, not models. There are no
-  assets of any kind in the repository.
+- **Players are simple stacked shapes**, not models. There are no image or
+  model assets in the repository: every texture is painted into a canvas at
+  startup.
+- **WebGL needs the network once.** three.js is fetched from a CDN on first
+  load. Without it the game still runs, on the canvas renderer, which looks
+  flatter.
 - **A sending-off leaves the team a player short** but the AI does not reshape
   its formation to compensate.
