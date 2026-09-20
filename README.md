@@ -4,7 +4,9 @@ A mobile-first, top-down 11-a-side arcade football game for one or two players
 on a single phone or tablet. Plain HTML5 canvas and ES modules, no build step,
 no dependencies, no network calls.
 
-![modes](docs/screenshots/match.png)
+![A match in landscape](docs/screenshots/match.png)
+
+<img src="docs/screenshots/setup.png" width="240" alt="Pre-match setup"> <img src="docs/screenshots/coop-portrait.png" width="240" alt="Two-player co-op in portrait">
 
 ## Run it
 
