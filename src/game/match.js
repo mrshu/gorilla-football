@@ -59,7 +59,14 @@ export class Match {
       p.human = h.index;
     }
     this.ball = createBall();
+    for (const p of this.players) p.pos = slotWorldPos(this.teams[p.team], p.slot);
     this.beginSetPiece({ kind: SET_PIECES.KICKOFF, team: this.kickoffTeam, pos: { x: PITCH.length / 2, y: HALF_W } });
+    // Start everyone already in their kickoff positions. A restart normally
+    // interpolates players in from wherever they were, but there is no
+    // "wherever they were" at the start of a match, and the first frame a
+    // renderer draws should look like a kickoff rather than twenty-two
+    // players piled on the corner flag.
+    this.snapToSetPiece();
   }
 
   // ------------------------------------------------------------------ API
@@ -338,6 +345,20 @@ export class Match {
       }
     }
     return targets;
+  }
+
+  // Put every player on their mark for the current restart immediately,
+  // skipping the walk-into-position animation.
+  snapToSetPiece() {
+    const sp = this.setPiece;
+    if (!sp) return;
+    for (const p of this.players) {
+      const target = sp.targets.get(p.id);
+      if (!target) continue;
+      p.pos = { ...target };
+      p.vel = { x: 0, y: 0 };
+      sp.starts.set(p.id, { ...target });
+    }
   }
 
   stepSetPiece(dt) {

@@ -263,3 +263,25 @@ test('simulation is deterministic for a given seed', () => {
   assert.deepEqual(a.ball.pos, b.ball.pos);
   assert.deepEqual(a.players.map((p) => p.pos), b.players.map((p) => p.pos));
 });
+
+test('players stand on their formation slots before a ball is kicked', () => {
+  const m = makeMatch();
+  // Nothing has been stepped yet: the very first frame a renderer sees.
+  for (const p of m.players) {
+    assert.ok(Number.isFinite(p.pos.x) && Number.isFinite(p.pos.y), 'position must be set');
+    assert.ok(p.pos.x > 0 && p.pos.x < PITCH.length, `#${p.number} is off the pitch lengthways at ${p.pos.x}`);
+    assert.ok(p.pos.y > 0 && p.pos.y < PITCH.width, `#${p.number} is off the pitch widthways at ${p.pos.y}`);
+  }
+  // And they are spread out, not stacked in one corner.
+  const xs = m.players.map((p) => p.pos.x);
+  const ys = m.players.map((p) => p.pos.y);
+  assert.ok(Math.max(...xs) - Math.min(...xs) > 40, 'teams should be spread along the pitch');
+  assert.ok(Math.max(...ys) - Math.min(...ys) > 30, 'players should be spread across the pitch');
+  // Each team is in its own half at kickoff.
+  for (const t of m.teams) {
+    for (const p of t.players) {
+      const ownHalf = t.attackDir > 0 ? p.pos.x <= PITCH.length / 2 + 2 : p.pos.x >= PITCH.length / 2 - 2;
+      assert.ok(ownHalf, `#${p.number} of ${t.name} should start in their own half`);
+    }
+  }
+});
