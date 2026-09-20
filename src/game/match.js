@@ -35,6 +35,7 @@ export class Match {
     this.aimControl = Boolean(config.aimControl);
     this.aimKicks = config.humans.map(() => null);
     this.presses = config.humans.map(() => false);
+    this.dribbles = config.humans.map(() => false);
     this.aimHold = null; // { playerId, since } while a human's team carries
     this.pendingDecision = null;
     this.decisionCarry = null;
@@ -546,7 +547,24 @@ export class Match {
     return true;
   }
 
-  // A tap with no aim: the nearest defender lunges at the carrier.
+  // A tap with no aim: push the ball on if you have it, close them down if
+  // you do not.
+  tap(humanIndex) {
+    if (!this.aimControl) return false;
+    if (this.canDribble(humanIndex)) {
+      this.dribbles[humanIndex] = true;
+      return true;
+    }
+    return this.press(humanIndex);
+  }
+
+  canDribble(humanIndex) {
+    if (!this.aimControl || this.state !== STATES.PLAY) return false;
+    const teamIndex = this.config.humans[humanIndex]?.team ?? 0;
+    const owner = this.ball.owner !== null ? this.getPlayer(this.ball.owner) : null;
+    return Boolean(owner && owner.team === teamIndex && owner.kickCooldown <= 0 && !owner.isGK);
+  }
+
   press(humanIndex) {
     if (!this.aimControl) return false;
     this.presses[humanIndex] = true;
@@ -570,11 +588,43 @@ export class Match {
       if (owner.team !== teamIndex) continue;
       this.playBall(owner, kick, {});
     }
+    for (let i = 0; i < this.dribbles.length; i++) {
+      if (!this.dribbles[i]) continue;
+      this.dribbles[i] = false;
+      if (this.canDribble(i)) this.pushBallOn(this.getPlayer(this.ball.owner));
+    }
     for (let i = 0; i < this.presses.length; i++) {
       if (!this.presses[i]) continue;
       this.presses[i] = false;
       this.pressWithNearest(i);
     }
+  }
+
+  // Knock the ball into space ahead and chase it. The touch is short enough
+  // that the carrier usually keeps it, but an opponent in the way can nick it,
+  // which is what makes tapping forward a decision rather than a free ride.
+  pushBallOn(p) {
+    const team = this.teams[p.team];
+    const goal = goalCenter(team.attackDir);
+    const facing = len(p.vel) > 1.5 ? norm(p.vel) : len(p.facing) > 0.01 ? norm(p.facing) : { x: team.attackDir, y: 0 };
+    // Bias the touch towards goal so tapping always makes progress.
+    const dir = norm(add(scale(facing, 1), scale(norm(sub(goal, p.pos)), 0.65)));
+    const speed = AIM.dribbleSpeed + p.stats.speed * 0.35;
+    this.ball.owner = null;
+    this.ball.homing = null;
+    this.ball.unstoppable = false;
+    this.ball.pos = add(p.pos, scale(dir, PHYSICS.playerRadius + PHYSICS.ballRadius + 0.1));
+    this.ball.vel = scale(dir, speed);
+    this.ball.z = 0;
+    this.ball.vz = 0;
+    this.ball.lastTouch = p.id;
+    this.ball.lastTouchTeam = p.team;
+    p.facing = dir;
+    // Just long enough that the ball gets away, then they can take it again.
+    p.kickCooldown = AIM.dribbleCooldown;
+    p.speedBoost = Math.max(p.speedBoost, AIM.dribbleBoost);
+    this.clearOffsideFlags();
+    this.emit('dribble', { playerId: p.id, team: p.team });
   }
 
   // One kick covers passing and shooting: the ball simply goes where it is

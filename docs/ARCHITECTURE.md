@@ -128,7 +128,9 @@ human's entire input is the ball:
   error grows with power and shrinks with the kicker's accuracy, and power above
   `AIM.loftPower` lifts the ball. A kick aimed at goal from range is recorded as
   a shot for the statistics, nothing more.
-- `press(human)` sends the nearest defender in, for a tap with no drag.
+- `tap(human)` is the no-drag gesture: `pushBallOn()` when you have the ball,
+  knocking it ahead and giving the carrier a short burst to chase it, and
+  `pressWithNearest()` when you do not.
 - `canKick(human)` gates all of it on that human's team actually having the
   ball, or being the taker at a restart.
 

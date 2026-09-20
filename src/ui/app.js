@@ -197,10 +197,10 @@ export class App {
     this.aimInput.configure({ camera: this.renderer3d.camera });
     for (const r of this.aimInput.drainReleases()) {
       if (r.tap) {
-        if (!m.canKick(r.human)) m.press(r.human);
+        m.tap(r.human);
         continue;
       }
-      if (!m.aimKick(r.human, r.dir, r.power)) m.press(r.human);
+      if (!m.aimKick(r.human, r.dir, r.power)) m.tap(r.human);
     }
   }
 
@@ -321,7 +321,7 @@ export class App {
     const m = this.match;
     if (m.state === STATES.GOAL) return null;
     if (m.canKick(0)) {
-      return m.state === STATES.PLAY ? 'Hold to aim · release to play it' : 'Hold to aim the restart';
+      return m.state === STATES.PLAY ? 'Tap to dribble · slide to pass or shoot' : 'Slide to aim the restart';
     }
     const owner = m.ball.owner !== null ? m.getPlayer(m.ball.owner) : null;
     if (owner && owner.team !== (m.config.humans[0]?.team ?? 0)) return 'Tap to close them down';

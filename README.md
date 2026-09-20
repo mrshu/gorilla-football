@@ -6,9 +6,9 @@ and ES modules: no build step, no dependencies, no network calls, and no 3D
 library. The perspective is a hand-rolled projection, so the whole thing is
 still a few files you can read.
 
-You run the whole team, not one striker. Hold anywhere to aim, drag for power,
-release to play the ball. There is no separate pass and shoot button: the ball
-goes exactly where you aimed, as hard as you hit it.
+You run the whole team, not one striker, with one finger: **tap to dribble,
+slide to pass or shoot**. There is no separate pass and shoot button, because
+the ball goes exactly where you aimed, as hard as you hit it.
 
 ![A match in landscape](docs/screenshots/match.png)
 
@@ -65,10 +65,13 @@ included, runs themselves; your job is the ball.
 
 | Touch | What happens |
 | --- | --- |
-| **Hold** anywhere in your area | Start aiming. A guide shows where the ball will travel. |
-| **Drag** further from where you pressed | More power. A short drag rolls a pass along the grass, a long one drives a shot. |
-| **Release** | Play the ball exactly where you aimed. |
-| **Tap** without dragging, while they have it | Close the carrier down. |
+| **Tap**, with the ball | Dribble: knock it into space ahead and chase it. |
+| **Tap**, without the ball | Close the carrier down. |
+| **Hold and slide** | Aim. A guide shows where the ball will travel, and dragging further gives more power. |
+| **Release** | Pass or shoot, exactly where you aimed, as hard as you dragged. |
+
+Dribble by tap, pass and shoot by slide. There is no separate pass and shoot
+button, because the ball simply goes where you aimed at the power you hit it.
 
 The player on the ball is ringed. Restarts work the same way: aim and release to
 take the throw, corner, free kick or penalty. Leave your carrier alone for six
@@ -266,6 +269,10 @@ asked about:
 - **One kick covers passing and shooting.** The ball goes where it is aimed at
   the power it was hit, which is what makes a single touch enough to play a
   whole match.
+- **A tap is a real touch, not a free ride.** Dribbling knocks the ball into
+  space ahead and gives the carrier a short burst to chase it, so an opponent
+  standing in the way can nick it. Tapping forward has to be a decision or it
+  would just be a faster way to walk.
 - **Decision moments are deliberately rationed** in assisted play. Pausing on
   every touch would be exhausting, so the panel opens on winning the ball,
   entering shooting range, being closed down (at most every 4.5 s) and after 5 s

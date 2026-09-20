@@ -40,10 +40,10 @@ export function showHowTo(root, onBack) {
     <h4>Whole team (default)</h4>
     <p>You run the whole side from a stadium camera. Every footballer moves themselves; your job is the ball.</p>
     <ul>
-      <li><b>Hold anywhere</b> on your half of the screen to aim. A guide shows where the ball will go.</li>
-      <li><b>Drag further</b> for more power. A short drag is a gentle pass along the grass, a long one is a driven shot.</li>
-      <li><b>Release</b> to play it. There is no separate pass and shoot: the ball goes exactly where you aimed, as hard as you hit it.</li>
-      <li><b>Tap</b> without dragging while the other side has the ball to close them down.</li>
+      <li><b>Tap</b> with the ball to dribble: you knock it into space ahead and chase it.</li>
+      <li><b>Tap</b> without the ball to close the other side down.</li>
+      <li><b>Hold and slide</b> to aim. A guide shows where the ball will go, and sliding further gives more power.</li>
+      <li><b>Release</b> to pass or shoot. There is no separate pass and shoot: the ball goes exactly where you aimed, as hard as you hit it.</li>
     </ul>
     <p>The player on the ball is ringed. If you leave them alone too long they will play it themselves, so the match never stalls.</p>
     <p>Restarts work the same way: aim and release to take the throw, corner, free kick or penalty.</p>

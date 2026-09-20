@@ -161,6 +161,59 @@ test('an untaken restart is played automatically so the match never stalls', () 
   assert.equal(m.state, STATES.PLAY, 'the AI should take the restart after the timeout');
 });
 
+test('a tap with the ball pushes it on and you chase it', () => {
+  const m = makeMatch({ seed: 12 });
+  intoPlay(m);
+  const p = m.teams[0].players[9];
+  p.pos = { x: 40, y: 34 };
+  p.facing = { x: m.teams[0].attackDir, y: 0 };
+  giveBall(m, p);
+  for (const o of m.teams[1].players) if (!o.isGK) o.pos = { x: 15, y: 5 };
+  assert.equal(m.canDribble(0), true);
+  assert.ok(m.tap(0));
+  m.step(PHYSICS.dt);
+  assert.equal(m.ball.owner, null, 'the touch should knock the ball ahead');
+  assert.ok(len(m.ball.vel) > 3, 'the ball should be moving');
+  assert.ok(p.speedBoost > 0, 'the carrier should be chasing their own touch');
+  // The knock-on goes forwards, towards the goal being attacked.
+  assert.ok(m.ball.vel.x * m.teams[0].attackDir > 0, 'the touch should go forwards');
+  // And they should get it back shortly afterwards.
+  let regained = false;
+  for (let i = 0; i < 90; i++) {
+    m.step(PHYSICS.dt);
+    if (m.ball.owner === p.id) {
+      regained = true;
+      break;
+    }
+  }
+  assert.ok(regained, 'the dribbler should reach their own knock-on');
+});
+
+test('a tap without the ball closes the opposition down instead', () => {
+  const m = makeMatch({ seed: 12 });
+  intoPlay(m);
+  const theirs = m.teams[1].players[7];
+  theirs.pos = { x: 50, y: 34 };
+  giveBall(m, theirs);
+  const mine = m.teams[0].players[6];
+  mine.pos = { x: 52, y: 34 };
+  mine.tackleCooldown = 0;
+  mine.sliding = 0;
+  assert.equal(m.canDribble(0), false);
+  assert.ok(m.tap(0));
+  m.step(PHYSICS.dt);
+  assert.ok(mine.tackleCooldown > 0 || mine.sliding > 0, 'the nearest defender should have gone in');
+});
+
+test('you cannot dribble when the ball is not yours', () => {
+  const m = makeMatch({ seed: 12 });
+  intoPlay(m);
+  giveBall(m, m.teams[1].players[7]);
+  assert.equal(m.canDribble(0), false);
+  m.ball.owner = null;
+  assert.equal(m.canDribble(0), false);
+});
+
 test('pressing lunges a defender at the ball', () => {
   const m = makeMatch();
   intoPlay(m);
