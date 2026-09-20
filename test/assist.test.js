@@ -5,8 +5,9 @@ import { normalizeConfig, MODES, CONTROL } from '../src/game/config.js';
 import { PHYSICS, STATES, SET_PIECES, DECISION } from '../src/game/constants.js';
 import { dist } from '../src/game/vec.js';
 
+// Assisted control is opt-in, so these tests ask for it explicitly.
 function makeMatch(over = {}) {
-  const cfg = normalizeConfig({ mode: MODES.SOLO, durationMinutes: 5, seed: 21, humans: [{ characterId: 'plumber' }], ...over });
+  const cfg = normalizeConfig({ mode: MODES.SOLO, control: CONTROL.ASSISTED, durationMinutes: 5, seed: 21, humans: [{ characterId: 'plumber' }], ...over });
   return new Match(cfg);
 }
 
@@ -50,10 +51,12 @@ function possessionInPlay(m) {
   return p;
 }
 
-test('assisted control is the default and manual is opt-in', () => {
-  assert.equal(normalizeConfig({}).control, CONTROL.ASSISTED);
-  assert.equal(normalizeConfig({}).assist, true);
-  assert.equal(normalizeConfig({ control: CONTROL.MANUAL }).assist, false);
+test('manual control is the default and assisted is opt-in', () => {
+  assert.equal(normalizeConfig({}).control, CONTROL.MANUAL);
+  assert.equal(normalizeConfig({}).assist, false);
+  assert.equal(normalizeConfig({ control: CONTROL.ASSISTED }).assist, true);
+  // An unrecognised value falls back to the default rather than throwing.
+  assert.equal(normalizeConfig({ control: 'nonsense' }).control, CONTROL.MANUAL);
 });
 
 test('the human player moves on their own with no input at all', () => {

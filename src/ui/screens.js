@@ -38,7 +38,15 @@ export function showHowTo(root, onBack) {
   box.append(el('h2', null, 'How to play'));
   box.append(el('div', 'body', `
     <p>You are one outfield player, marked with a ring. Goalkeepers and everyone else are run by the computer.</p>
-    <h4>Assisted control (default)</h4>
+    <h4>Manual control (default)</h4>
+    <p>You drive your player yourself with the joystick on your side of the screen. Touch anywhere in the joystick zone to put the stick under your thumb. Nothing ever pauses.</p>
+    <ul>
+      <li><b>PASS</b> — with the ball: pass to whoever you are aiming at. Without it: tackle.</li>
+      <li><b>SHOOT</b> — with the ball: shoot, aiming up or down to place it. Without it: slide tackle.</li>
+      <li><b>SPECIAL</b> — your character's signature move.</li>
+    </ul>
+    <p>At a restart the taker aims with the joystick and presses PASS or SHOOT; wait too long and they play it automatically.</p>
+    <h4>Assisted control</h4>
     <p>Your player runs themselves, like every other footballer on the pitch. The match <b>freezes</b> whenever you have a real choice: when you win the ball, when you reach shooting range, when an opponent closes you down, and at every restart you take.</p>
     <p>A panel then offers your options. Passes show the teammate, the distance and whether they are free, and the lines on the pitch show where each ball would go.</p>
     <ul>
@@ -48,14 +56,6 @@ export function showHowTo(root, onBack) {
       <li><b>DRIBBLE</b> — carry on and decide a moment later.</li>
     </ul>
     <p>Between decisions you can still steer with the joystick and use the buttons whenever you like. Nothing forces you to wait for the panel.</p>
-    <h4>Manual control</h4>
-    <p>Choose it in the setup screen if you would rather drive everything yourself and never pause:</p>
-    <ul>
-      <li><b>PASS</b> — with the ball: pass to whoever you are aiming at. Without it: tackle.</li>
-      <li><b>SHOOT</b> — with the ball: shoot, aiming up or down to place it. Without it: slide tackle.</li>
-      <li><b>SPECIAL</b> — your signature move.</li>
-    </ul>
-    <p>At a restart the taker aims with the joystick and presses PASS or SHOOT; wait too long and they play it automatically.</p>
     <p><b>Keyboard (desktop):</b> P1 = WASD + J / K / L. P2 = arrow keys + 1 / 2 / 3. Esc pauses.</p>
     <p>Two-player matches give each person their own joystick and buttons so two people can hold the same device.</p>
   `));

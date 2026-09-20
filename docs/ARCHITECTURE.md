@@ -88,8 +88,11 @@ teammate or clears long.
 
 ## Assisted control and decision pauses
 
-By default a human's footballer is driven by the same AI as everyone else, and
-the match freezes when they have a choice to make. Three pieces make that work.
+Manual control is the default: the human drives their footballer with the
+joystick and buttons, and nothing pauses. Assisted control is the opt-in
+alternative, where a human's footballer is driven by the same AI as everyone
+else and the match freezes when they have a choice to make. Three pieces make
+that work.
 
 **Movement.** `controlAssistedHuman()` runs the normal AI to set the player's
 desired velocity, then lets the joystick override it while it is pushed. The

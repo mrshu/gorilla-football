@@ -4,11 +4,9 @@ A mobile-first, top-down 11-a-side arcade football game for one or two players
 on a single phone or tablet. Plain HTML5 canvas and ES modules, no build step,
 no dependencies, no network calls.
 
-Your footballer runs themselves, like the other twenty-one on the pitch. The
-match freezes when you have a real choice to make and asks what you want to do:
-shoot, pass to a named teammate, fire your special, or carry on dribbling. If
-you would rather drive everything yourself, manual control is one tap away on
-the setup screen.
+You drive your footballer yourself with a joystick and three buttons. If you
+would rather have them run themselves and be asked what to do at the moments
+that matter, assisted control is one tap away on the setup screen.
 
 ![A match in landscape](docs/screenshots/match.png)
 
@@ -56,8 +54,14 @@ connections on port 8000.
 
 ## Controls
 
-Each player gets a floating joystick and three buttons on their own side of the
-screen. Touch anywhere in the joystick zone to place the stick under your thumb.
+You are one outfield player, marked with a ring. There are two control styles,
+chosen on the setup screen.
+
+### Manual, the default
+
+You drive your player the whole time and nothing ever pauses. Each player gets a
+floating joystick and three buttons on their own side of the screen. Touch
+anywhere in the joystick zone to place the stick under your thumb.
 
 | Button | With the ball | Without the ball |
 | --- | --- | --- |
@@ -68,8 +72,34 @@ screen. Touch anywhere in the joystick zone to place the stick under your thumb.
 At a restart the taker aims with the joystick and presses PASS or SHOOT. After
 eight seconds they play it automatically so the game never stalls.
 
-Desktop keyboard fallback for testing: player 1 uses `WASD` + `J` / `K` / `L`,
-player 2 uses the arrow keys + `1` / `2` / `3`, `Esc` pauses.
+### Assisted
+
+Pick it on the setup screen. Your footballer is then driven by the same AI as
+everyone else, and the match **freezes** at the moments where you have a genuine
+choice. A panel offers your options:
+
+| Option | What it does |
+| --- | --- |
+| **SHOOT** | Have a go at goal. The panel shows the distance. |
+| **PASS #n** | Play it to that teammate. The panel names them and says whether they are free or covered. |
+| **SPECIAL** | Your character's signature move, with uses or cooldown remaining. |
+| **DRIBBLE** | Carry on and decide again a moment later. |
+
+While the panel is open the pitch shows where each pass would travel and where a
+shot would be aimed, so you can read the choice without hunting for it.
+
+The match freezes when you win the ball, when you carry it into shooting range,
+when an opponent closes you down, after a few seconds of untroubled dribbling,
+and at every restart you are taking. Nothing else pauses: defending, chasing and
+positioning all happen at full speed. The joystick still steers between
+decisions and the three buttons still work, so assisted control never takes your
+player away from you.
+
+### Keyboard
+
+Desktop fallback for testing: player 1 uses `WASD` + `J` / `K` / `L`, player 2
+uses the arrow keys + `1` / `2` / `3`, `Esc` pauses. `Esc` also works while a
+decision panel is open.
 
 ## Modes
 
@@ -186,6 +216,20 @@ asked about:
 - **One human controls one fixed player** rather than switching to whoever is
   nearest. Switching adds control ambiguity in two-player modes, and fixed
   control makes the character choice matter.
+- **Manual control is the default**, because driving your own player with the
+  joystick is the game people expect. Assisted control, where the AI runs your
+  footballer and the simulation freezes at decision points, is a setup option:
+  the two want different things from the same simulation and both are worth
+  keeping.
+- **Decision moments are deliberately rationed** in assisted play. Pausing on
+  every touch would be exhausting, so the panel opens on winning the ball,
+  entering shooting range, being closed down (at most every 4.5 s) and after 5 s
+  of untroubled carrying. That works out at roughly one decision every five
+  seconds of play.
+- **Teammates look for the human in assisted play.** A human receiver gets a
+  bonus when the AI ranks its pass options, and the human chases loose balls a
+  little harder. Without it the person holding the phone spent most of the match
+  watching, which is the wrong game.
 - **Restart takers wait for the human** who should take it, with an eight-second
   timeout so play never stalls.
 - **Offside is judged at the moment of the kick** and punished on the next
@@ -208,6 +252,9 @@ bugs:
 - **Throw-ins are taken with a kick**, not a two-handed throw. The restart, the
   possession award and the offside exemption are correct; only the animation
   and the "must use hands" rule are missing.
+- **Assisted play never pauses for defensive choices.** Tackling, marking and
+  interceptions stay automatic, with the buttons available live. Pausing for
+  them would interrupt constantly and the choices are far less interesting.
 - **The AI does not use special abilities** by default. Several preset rosters
   contain Gorillas, and an AI with guaranteed goals is not fun to play against.
   Set `aiUsesSpecials: true` in the match config to switch it on.

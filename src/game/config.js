@@ -22,14 +22,15 @@ export const DURATION_OPTIONS = [1, 2, 3, 5, 8, 10, 15];
 export const DEFAULT_DURATION_MINUTES = 5;
 
 // How a human's footballer is driven.
+//   MANUAL:   the human drives them entirely with the joystick and buttons.
+//             This is the default: you control your player.
 //   ASSISTED: the AI runs them like any other player and the match freezes at
 //             decision moments so the human chooses what to do with the ball.
-//   MANUAL:   the human drives them entirely with the joystick and buttons.
-export const CONTROL = Object.freeze({ ASSISTED: 'assisted', MANUAL: 'manual' });
+export const CONTROL = Object.freeze({ MANUAL: 'manual', ASSISTED: 'assisted' });
 
 export const CONTROL_INFO = [
+  { id: CONTROL.MANUAL, name: 'Manual', detail: 'You drive your player the whole time with the joystick. Nothing pauses.' },
   { id: CONTROL.ASSISTED, name: 'Assisted', detail: 'Your player runs themselves. The match pauses when you have a choice to make.' },
-  { id: CONTROL.MANUAL, name: 'Manual', detail: 'You drive your player the whole time. Nothing pauses.' },
 ];
 
 export function humanCount(mode) {
@@ -47,7 +48,7 @@ export function defaultConfig() {
     mode: MODES.SOLO,
     durationMinutes: DEFAULT_DURATION_MINUTES,
     seed: (Date.now() % 2147483647) | 0,
-    control: CONTROL.ASSISTED,
+    control: CONTROL.MANUAL,
     aiUsesSpecials: false,
     teams: [
       { presetId: TEAM_PRESETS[0].id, jerseyId: TEAM_PRESETS[0].defaultJersey },
@@ -67,7 +68,7 @@ export function normalizeConfig(input) {
   const minutes = Number(cfg.durationMinutes);
   if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 90) throw new Error('Match duration must be between 0 and 90 minutes');
   if (!Array.isArray(cfg.teams) || cfg.teams.length !== 2) throw new Error('Exactly two teams required');
-  const control = cfg.control === CONTROL.MANUAL ? CONTROL.MANUAL : CONTROL.ASSISTED;
+  const control = cfg.control === CONTROL.ASSISTED ? CONTROL.ASSISTED : CONTROL.MANUAL;
 
   const teams = cfg.teams.map((t, i) => {
     const preset = getTeamPreset(t.presetId);
