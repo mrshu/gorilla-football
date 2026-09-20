@@ -18,15 +18,33 @@ const el = (tag, cls, html) => {
 export function showMenu(root, { onPlay, onHowTo }) {
   root.innerHTML = '';
   root.className = 'overlay menu';
-  const box = el('div', 'panel');
+  const box = el('div', 'panel menu-panel');
+  const eyebrow = el('div', 'menu-eyebrow');
+  eyebrow.append(el('span', null, 'GF / 01'));
+  eyebrow.append(el('span', null, 'NIGHT LEAGUE'));
+  box.append(eyebrow);
   box.append(el('h1', 'title', 'GORILLA<span>FOOTBALL</span>'));
-  box.append(el('p', 'subtitle', '11-a-side arcade football for one or two players on one device.'));
-  const play = el('button', 'btn primary big', 'PLAY');
+  box.append(el('p', 'subtitle', 'Street rules. Wild physics. One perfect touch.'));
+
+  const signal = el('div', 'menu-signal');
+  signal.append(el('span', 'signal-dot'));
+  signal.append(el('span', null, 'LIVE FROM THE CONCRETE JUNGLE'));
+  box.append(signal);
+
+  const play = el('button', 'btn primary big', 'Kick off');
   play.onclick = onPlay;
-  const how = el('button', 'btn ghost', 'How to play');
+  const how = el('button', 'btn ghost', 'Read the playbook');
   how.onclick = onHowTo;
-  box.append(play, how);
-  box.append(el('p', 'foot', 'Original characters. Tap PLAY to set up a match.'));
+  const actions = el('div', 'menu-actions');
+  actions.append(play, how);
+  box.append(actions);
+
+  const meta = el('div', 'menu-meta');
+  meta.append(el('div', null, '<b>11</b><span>players a side</span>'));
+  meta.append(el('div', null, '<b>01—02</b><span>players on one device</span>'));
+  meta.append(el('div', null, '<b>∞</b><span>ways to bend the ball</span>'));
+  box.append(meta);
+  box.append(el('p', 'foot menu-foot', 'A Gorilla Football original · best played loud'));
   root.append(box);
   root.hidden = false;
 }
@@ -87,8 +105,16 @@ export function showSetup(root, initial, { onStart, onBack }) {
 
   function render() {
     root.innerHTML = '';
-    const box = el('div', 'panel scroll wide');
-    box.append(el('h2', null, 'Match setup'));
+    const box = el('div', 'panel scroll wide setup-panel');
+    const top = el('div', 'setup-topline');
+    top.append(el('span', null, 'GF / 01'));
+    top.append(el('span', null, 'PRE-FLIGHT CHECK'));
+    box.append(top);
+    box.append(el('h2', 'setup-title', 'Build your squad'));
+    box.append(el('p', 'subtitle', 'Tune the matchup, then send it into the lights.'));
+    const cast = el('div', 'character-hero');
+    cast.innerHTML = '<img src="public/assets/gorilla-football-character-sheet.png" alt="The Gorilla Football character lineup"><span>THE NIGHT LEAGUE CAST</span>';
+    box.append(cast);
 
     // Mode
     box.append(section('Game mode', modeRow()));

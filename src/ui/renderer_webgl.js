@@ -19,6 +19,7 @@ export class RendererWebGL {
     this.camera = new Camera(); // shared with input; the source of truth
     this.smoothBall = null;
     this.playerViews = new Map();
+    this.pose = null;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -29,8 +30,8 @@ export class RendererWebGL {
     // grass would come out mint instead of green.
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#5c8fb8');
-    this.scene.fog = new THREE.Fog('#7aa6c6', 150, 330);
+    this.scene.background = new THREE.Color('#101429');
+    this.scene.fog = new THREE.Fog('#2b3158', 150, 330);
 
     this.three = new THREE.PerspectiveCamera(50, 1, 0.5, 600);
     this.three.up.set(0, 1, 0);
@@ -38,6 +39,7 @@ export class RendererWebGL {
     this.buildLights();
     this.buildPitch();
     this.buildStands();
+    this.buildFloodlights();
     this.buildGoals();
     this.buildBall();
   }
@@ -46,8 +48,8 @@ export class RendererWebGL {
 
   buildLights() {
     const { THREE, scene } = this;
-    scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x3b7a45, 0.95));
-    const key = new THREE.DirectionalLight(0xfff6e6, 1.0);
+    scene.add(new THREE.HemisphereLight(0x8e9dff, 0x10251b, 0.62));
+    const key = new THREE.DirectionalLight(0xffe4b0, 0.72);
     key.position.set(PITCH.length * 0.35, 90, 60);
     key.target.position.set(PITCH.length / 2, 0, -PITCH.width / 2);
     key.castShadow = true;
@@ -66,7 +68,7 @@ export class RendererWebGL {
     scene.add(key);
     scene.add(key.target);
     this.keyLight = key;
-    const fill = new THREE.DirectionalLight(0xdcebff, 0.3);
+    const fill = new THREE.DirectionalLight(0x6674d8, 0.2);
     fill.position.set(PITCH.length * 0.7, 50, -90);
     scene.add(fill);
   }
@@ -85,7 +87,7 @@ export class RendererWebGL {
     // Darker ground running out to the stands.
     const surround = new THREE.Mesh(
       new THREE.PlaneGeometry(width + 120, height + 120),
-      new THREE.MeshLambertMaterial({ color: '#1e5427' }),
+      new THREE.MeshLambertMaterial({ color: '#142f2b' }),
     );
     surround.rotation.x = -Math.PI / 2;
     surround.position.set(PITCH.length / 2, -0.02, -PITCH.width / 2);
@@ -98,7 +100,7 @@ export class RendererWebGL {
   buildStands() {
     const { THREE, scene } = this;
     const crowd = crowdTexture(THREE);
-    const concrete = new THREE.MeshLambertMaterial({ color: '#33424d' });
+    const concrete = new THREE.MeshLambertMaterial({ color: '#171d35' });
     const L = PITCH.length;
     const W = PITCH.width;
     const track = 7; // clear space between touchline and first row
@@ -141,6 +143,40 @@ export class RendererWebGL {
       const x0 = sign < 0 ? -track : L + track;
       tier(d1, 9, endLen, x0 + sign * d1 / 2, W / 2, 1.5, d1 / 20);
       tier(d2, 11, endLen, x0 + sign * (d1 + d2 / 2), W / 2, 9.5, d2 / 20);
+    }
+  }
+
+  // Warm pools of light make the night stadium feel inhabited and keep the
+  // character silhouettes readable without flattening the whole scene.
+  buildFloodlights() {
+    const { THREE, scene } = this;
+    const postMat = new THREE.MeshLambertMaterial({ color: '#202844' });
+    const lampMat = new THREE.MeshBasicMaterial({ color: '#ffd35c' });
+    const lampPositions = [
+      { x: 12, y: -18 },
+      { x: PITCH.length - 12, y: -18 },
+      { x: 12, y: PITCH.width + 18 },
+      { x: PITCH.length - 12, y: PITCH.width + 18 },
+    ];
+    for (const pos of lampPositions) {
+      const mast = new THREE.Group();
+      mast.position.copy(toThree(THREE, pos.x, pos.y, 0));
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.4, 17, 8), postMat);
+      post.position.y = 8.5;
+      post.castShadow = true;
+      mast.add(post);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.18, 0.18), postMat);
+      arm.position.set(0, 17.1, pos.y < 0 ? -0.8 : 0.8);
+      mast.add(arm);
+      for (let i = -2; i <= 2; i++) {
+        const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.2, 0.12), lampMat);
+        lamp.position.set(i * 0.5, 17.25, pos.y < 0 ? -0.92 : 0.92);
+        mast.add(lamp);
+      }
+      scene.add(mast);
+      const glow = new THREE.PointLight(0xffd35c, 1.1, 105, 2);
+      glow.position.copy(toThree(THREE, pos.x, pos.y, 16.8));
+      scene.add(glow);
     }
   }
 
@@ -206,31 +242,47 @@ export class RendererWebGL {
 
   // -------------------------------------------------------------- players
 
-  // A footballer built from primitives: legs with boots, shorts, a torso with
-  // sleeved arms, a neck and a head with hair. Crude up close, but at the
-  // distance the camera sits it reads as a person rather than a skittle, and
-  // the limbs swing so running looks like running.
+  // A stylized footballer built from low-poly primitives. The base rig is
+  // shared across the roster, while the character-specific shell, hat, muzzle
+  // or belly gives every animal a readable silhouette from the broadcast view.
   playerView(p) {
-    let view = this.playerViews.get(p.id);
-    if (view) return view;
     const { THREE, scene } = this;
-    const size = p.character.look.size;
+    let view = this.playerViews.get(p.id);
+    const signature = [p.character.id, p.jersey.primary, p.jersey.secondary].join('|');
+    if (view && view.signature === signature) return view;
+    // Matches can be restarted with a different character or kit while the
+    // renderer lives on. Rebuild that player's visual instead of leaving the
+    // previous model cached under the same simulation id.
+    if (view) scene.remove(view.group);
+    const size = p.character.look.size * 1.4;
     const S = (n) => n * size;
     const group = new THREE.Group();
 
-    const shirt = new THREE.MeshLambertMaterial({ color: p.jersey.primary });
-    const shortsMat = new THREE.MeshLambertMaterial({ color: shade(p.jersey.primary, -0.5) });
-    const sockMat = new THREE.MeshLambertMaterial({ color: p.jersey.secondary });
-    const skin = new THREE.MeshLambertMaterial({ color: p.character.look.skin });
-    const hairMat = new THREE.MeshLambertMaterial({ color: p.character.look.accent });
-    const boot = new THREE.MeshLambertMaterial({ color: '#23262b' });
+    const material = (color, roughness = 0.84) => new THREE.MeshStandardMaterial({ color, roughness, metalness: 0.02 });
+    const shirt = material(p.jersey.primary);
+    const shortsMat = material(shade(p.jersey.primary, -0.5));
+    const sockMat = material(p.jersey.secondary);
+    const skin = material(p.character.look.skin, 0.92);
+    const hairMat = material(p.character.look.accent);
+    const accent = material(p.character.look.accent);
+    const white = material('#f5f4e9', 0.9);
+    const black = material('#111321', 0.72);
+    const boot = material('#23262b', 0.62);
 
-    const mesh = (geo, mat, x, y, z) => {
+    const mesh = (geo, mat, x = 0, y = 0, z = 0) => {
       const m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, z);
       m.castShadow = true;
       return m;
     };
+
+    const sphere = (mat, x, y, z, sx = 1, sy = 1, sz = 1, segments = 12) => {
+      const m = mesh(new THREE.SphereGeometry(S(0.16), segments, 8), mat, S(x), S(y), S(z));
+      m.scale.set(sx, sy, sz);
+      return m;
+    };
+
+    const eye = (x, y, z = -0.15) => sphere(black, x, y, z, 0.7, 0.8, 0.42, 8);
 
     // Legs: thigh, shin and boot, hung off a hip pivot so they can swing.
     const legs = [];
@@ -241,44 +293,108 @@ export class RendererWebGL {
       const knee = new THREE.Group();
       knee.position.set(0, S(-0.42), 0);
       knee.add(mesh(new THREE.CylinderGeometry(S(0.075), S(0.06), S(0.4), 8), sockMat, 0, S(-0.2), 0));
-      knee.add(mesh(new THREE.BoxGeometry(S(0.13), S(0.08), S(0.26)), boot, 0, S(-0.42), S(0.05)));
+      knee.add(mesh(new THREE.BoxGeometry(S(0.16), S(0.09), S(0.3)), boot, 0, S(-0.42), S(0.05)));
       hip.add(knee);
       group.add(hip);
       legs.push({ hip, knee });
     }
 
-    // Shorts and torso.
-    group.add(mesh(new THREE.CylinderGeometry(S(0.27), S(0.24), S(0.3), 10), shortsMat, 0, S(0.92), 0));
-    const torso = mesh(new THREE.CylinderGeometry(S(0.26), S(0.28), S(0.56), 12), shirt, 0, S(1.34), 0);
+    // Shorts, torso, collar and a clean kit stripe give the model a stronger
+    // silhouette than a stack of unadorned cylinders.
+    group.add(mesh(new THREE.SphereGeometry(S(0.32), 12, 8), shortsMat, 0, S(0.92), 0));
+    const torso = mesh(new THREE.SphereGeometry(S(0.39), 12, 9), shirt, 0, S(1.34), 0);
+    torso.scale.set(0.78, 1.05, 0.62);
     group.add(torso);
+    group.add(mesh(new THREE.TorusGeometry(S(0.22), S(0.035), 6, 12), accent, 0, S(1.65), 0));
+    const stripe = mesh(new THREE.BoxGeometry(S(0.48), S(0.07), S(0.035)), accent, 0, S(1.35), S(-0.24));
+    stripe.castShadow = false;
+    group.add(stripe);
     // Shoulders, so the silhouette is not a tube.
-    group.add(mesh(new THREE.SphereGeometry(S(0.15), 10, 8), shirt, S(-0.25), S(1.58), 0));
-    group.add(mesh(new THREE.SphereGeometry(S(0.15), 10, 8), shirt, S(0.25), S(1.58), 0));
+    group.add(sphere(shirt, -0.26, 1.55, 0, 1.05, 0.95, 0.9));
+    group.add(sphere(shirt, 0.26, 1.55, 0, 1.05, 0.95, 0.9));
 
     // Arms: a sleeve in the shirt colour, then a bare forearm.
     const arms = [];
     for (const side of [-1, 1]) {
       const shoulder = new THREE.Group();
       shoulder.position.set(side * S(0.3), S(1.56), 0);
-      shoulder.add(mesh(new THREE.CylinderGeometry(S(0.075), S(0.065), S(0.28), 8), shirt, 0, S(-0.14), 0));
-      shoulder.add(mesh(new THREE.CylinderGeometry(S(0.06), S(0.055), S(0.3), 8), skin, 0, S(-0.43), 0));
+      shoulder.add(mesh(new THREE.CylinderGeometry(S(0.09), S(0.065), S(0.29), 8), shirt, 0, S(-0.14), 0));
+      shoulder.add(mesh(new THREE.CylinderGeometry(S(0.065), S(0.05), S(0.29), 8), skin, 0, S(-0.43), 0));
+      shoulder.add(sphere(skin, 0, -0.61, 0, 0.72, 0.72, 0.72, 8));
       group.add(shoulder);
       arms.push(shoulder);
     }
 
-    // Neck and head.
-    group.add(mesh(new THREE.CylinderGeometry(S(0.07), S(0.08), S(0.1), 8), skin, 0, S(1.66), 0));
-    const head = mesh(new THREE.SphereGeometry(S(0.15), 14, 12), skin, 0, S(1.83), 0);
-    head.scale.set(1, 1.12, 1.02);
+    // Neck, head, eyes and a small mouth/visor cue. The face is intentionally
+    // graphic so it reads even when a player is only a few pixels tall.
+    group.add(mesh(new THREE.CylinderGeometry(S(0.08), S(0.09), S(0.1), 8), skin, 0, S(1.66), 0));
+    const head = mesh(new THREE.SphereGeometry(S(0.2), 14, 10), skin, 0, S(1.84), 0);
+    head.scale.set(0.95, 1.1, 0.92);
     group.add(head);
-    // Hair as a cap over the top and back of the skull.
-    const hair = mesh(new THREE.SphereGeometry(S(0.155), 14, 10, 0, Math.PI * 2, 0, Math.PI / 1.9), hairMat, 0, S(1.85), S(-0.01));
-    hair.scale.set(1, 1.05, 1.05);
-    group.add(hair);
+    group.add(eye(-0.075, 1.88));
+    group.add(eye(0.075, 1.88));
+    const mouth = mesh(new THREE.BoxGeometry(S(0.12), S(0.025), S(0.025)), black, 0, S(1.75), S(-0.175));
+    mouth.castShadow = false;
+    group.add(mouth);
+
+    const shape = p.character.look.shape;
+    if (shape === 'gorilla') {
+      group.add(sphere(hairMat, 0, 1.96, 0.01, 1.5, 1.05, 1.1, 10));
+      group.add(sphere(accent, 0, 1.78, -0.19, 1.0, 0.62, 0.35, 10));
+      group.add(sphere(accent, -0.23, 1.86, 0, 0.58, 0.7, 0.55, 8));
+      group.add(sphere(accent, 0.23, 1.86, 0, 0.58, 0.7, 0.55, 8));
+      group.add(sphere(shirt, -0.36, 1.38, 0, 1.15, 1.25, 1.05, 10));
+      group.add(sphere(shirt, 0.36, 1.38, 0, 1.15, 1.25, 1.05, 10));
+    } else if (shape === 'tortoise') {
+      const shell = mesh(new THREE.DodecahedronGeometry(S(0.42), 1), accent, 0, S(1.35), S(0.24));
+      shell.scale.set(1.1, 1.05, 0.48);
+      group.add(shell);
+      group.add(sphere(accent, 0, 1.98, 0, 0.88, 0.72, 0.9, 10));
+      group.add(sphere(skin, 0, 1.76, -0.19, 0.72, 0.62, 0.38, 10));
+    } else if (shape === 'wizard') {
+      const brim = mesh(new THREE.CylinderGeometry(S(0.28), S(0.28), S(0.06), 12), accent, 0, S(2.03), 0);
+      const hat = mesh(new THREE.ConeGeometry(S(0.2), S(0.48), 12), accent, 0, S(2.28), 0);
+      hat.rotation.z = -0.16;
+      group.add(brim, hat);
+      group.add(sphere(white, 0, 1.78, -0.18, 0.55, 0.42, 0.25, 8));
+    } else if (shape === 'rocket') {
+      const helmet = mesh(new THREE.SphereGeometry(S(0.23), 12, 8), accent, 0, S(1.91), 0);
+      helmet.scale.set(1, 0.78, 0.95);
+      group.add(helmet);
+      const visor = mesh(new THREE.BoxGeometry(S(0.27), S(0.09), S(0.025)), black, 0, S(1.9), S(-0.21));
+      visor.castShadow = false;
+      group.add(visor);
+      for (const side of [-1, 1]) {
+        const fin = mesh(new THREE.ConeGeometry(S(0.1), S(0.3), 4), accent, side * S(0.37), S(1.1), S(0.08));
+        fin.rotation.z = side * Math.PI / 2;
+        group.add(fin);
+      }
+    } else if (shape === 'penguin') {
+      // Keep the dark body just behind the kit so the penguin reads clearly
+      // without losing the shirt, stripe, or team colour at match distance.
+      group.add(sphere(black, 0, 1.37, 0.2, 0.98, 1.04, 0.82, 10));
+      group.add(sphere(white, 0, 1.38, -0.24, 0.62, 0.88, 0.28, 10));
+      const beak = mesh(new THREE.ConeGeometry(S(0.09), S(0.2), 4), accent, 0, S(1.77), S(-0.29));
+      beak.rotation.x = Math.PI / 2;
+      group.add(beak);
+    } else if (shape === 'yeti') {
+      group.add(sphere(white, 0, 1.96, 0, 1.35, 1.25, 1.2, 10));
+      group.add(sphere(accent, 0, 1.79, -0.2, 0.72, 0.55, 0.32, 10));
+      group.add(sphere(white, -0.36, 1.42, 0.1, 0.9, 1.05, 0.82, 10));
+      group.add(sphere(white, 0.36, 1.42, 0.1, 0.9, 1.05, 0.82, 10));
+    } else {
+      // Plumber: a cap and moustache keep the roster distinct without making
+      // the kit unreadable.
+      const cap = mesh(new THREE.SphereGeometry(S(0.23), 12, 8), accent, 0, S(1.99), 0);
+      cap.scale.set(1.05, 0.54, 1.05);
+      group.add(cap);
+      group.add(mesh(new THREE.BoxGeometry(S(0.32), S(0.04), S(0.14)), accent, 0, S(1.92), S(-0.16)));
+      group.add(sphere(hairMat, 0, 1.74, -0.2, 0.7, 0.32, 0.2, 8));
+    }
 
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(S(0.55), S(0.8), 24),
-      new THREE.MeshBasicMaterial({ color: 0xffe600, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
+      new THREE.RingGeometry(S(0.64), S(0.88), 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd35c, transparent: true, opacity: 0.92, side: THREE.DoubleSide }),
     );
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.03;
@@ -286,7 +402,7 @@ export class RendererWebGL {
     group.add(ring);
 
     scene.add(group);
-    view = { group, ring, torso, legs, arms, phase: Math.random() * Math.PI * 2 };
+    view = { group, ring, torso, legs, arms, head, phase: Math.random() * Math.PI * 2, bob: 0, size, signature };
     this.playerViews.set(p.id, view);
     return view;
   }
@@ -304,6 +420,8 @@ export class RendererWebGL {
     view.legs[1].knee.rotation.x = Math.max(0, a * 0.9);
     view.arms[0].rotation.x = -a * 0.7;
     view.arms[1].rotation.x = a * 0.7;
+    view.bob = Math.sin(view.phase * 2) * Math.min(0.035, speed * 0.004);
+    view.head.rotation.z = Math.sin(view.phase * 2) * 0.025;
     // Lean into a sprint, and fall flat when sliding.
     view.group.rotation.x = p.sliding > 0 ? -1.15 : -Math.min(0.22, speed * 0.022);
   }
@@ -340,21 +458,32 @@ export class RendererWebGL {
   applyFraming(layout, dt) {
     if (layout.firstPerson && layout.eyePlayer) {
       frameFirstPerson(this.camera, layout.eyePlayer, this.smoothLook(layout, dt), layout.portrait);
+      this.applySmoothedPose(cameraPose(this.camera), dt);
       this.shotBlend = 0;
       return;
     }
     // Drop in behind the player on the ball once they are in range of goal,
     // easing between the two so it reads as a camera move, not a cut.
     const want = layout.shooter ? 1 : 0;
-    const rate = 1 - Math.exp(-3.2 * Math.max(0, Math.min(dt, 0.2)));
+    const rate = 1 - Math.exp(-1.8 * Math.max(0, Math.min(dt, 0.2)));
     this.shotBlend = (this.shotBlend || 0) + (want - (this.shotBlend || 0)) * rate;
     const wide = sidelinePose(this.smoothBall, layout.viewAttackDir, layout.portrait);
     if (this.shotBlend < 0.01 || !layout.shotAnchor) {
-      applyPose(this.camera, wide);
+      this.applySmoothedPose(wide, dt);
       return;
     }
     const close = shootingPose(layout.shotAnchor.carrier, layout.shotAnchor.goal, layout.portrait);
-    applyPose(this.camera, blendPose(wide, close, this.shotBlend));
+    this.applySmoothedPose(blendPose(wide, close, this.shotBlend), dt);
+  }
+
+  applySmoothedPose(target, dt) {
+    if (!this.pose || dt >= 0.9) {
+      this.pose = target;
+    } else {
+      const amount = 1 - Math.exp(-1.65 * Math.max(0, Math.min(dt, 0.2)));
+      this.pose = blendPose(this.pose, target, amount);
+    }
+    applyPose(this.camera, this.pose);
   }
 
   // Ease the point first person is looking at, so the view does not snap
@@ -371,6 +500,7 @@ export class RendererWebGL {
   resetCamera(match, layout) {
     this.smoothBall = { ...match.ball.pos };
     this.smoothedLook = layout && layout.lookAt ? { ...layout.lookAt } : null;
+    this.pose = null;
     if (layout) this.updateCamera(match, layout, 1);
   }
 
@@ -403,6 +533,7 @@ export class RendererWebGL {
       const f = p.facing;
       view.group.rotation.y = Math.atan2(f.x, -f.y) - Math.PI / 2;
       this.animate(view, p, opts.dt || 0);
+      view.group.position.y += view.bob;
       const controlled = opts.controlledIds && opts.controlledIds.has(p.id);
       view.ring.visible = Boolean(controlled);
       if (controlled) view.ring.material.color.set(p.human === 1 ? 0x00e5ff : 0xffe600);
@@ -430,4 +561,12 @@ function shade(hex, amount) {
     Math.round(Math.max(0, Math.min(255, amount < 0 ? c * (1 + amount) : c + (255 - c) * amount))),
   );
   return `rgb(${ch[0]},${ch[1]},${ch[2]})`;
+}
+
+function cameraPose(camera) {
+  return {
+    eye: { ...camera.eye },
+    target: { ...camera.target },
+    fov: (camera.fovY * 180) / Math.PI,
+  };
 }

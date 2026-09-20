@@ -17,6 +17,8 @@ import { showMenu, showHowTo, showSetup, showPause, showHalftime, showFullTime, 
 
 const SCREEN = { MENU: 'menu', HOWTO: 'howto', SETUP: 'setup', MATCH: 'match', DECISION: 'decision', PAUSE: 'pause', HALFTIME: 'halftime', FULLTIME: 'fulltime' };
 const STORE_KEY = 'gorilla-football/setup';
+const CAMERA_TRANSITION_SECONDS = 0.72;
+const CAMERA_TRANSITION_HOLD = 0.12;
 
 export class App {
   constructor({ canvas, gl, hud, overlay }) {
@@ -39,6 +41,7 @@ export class App {
     this.accumulator = 0;
     this.lastTs = 0;
     this.layout = null;
+    this.cameraTransition = null;
     this.resize();
     this.initWebGL();
     window.addEventListener('resize', () => this.resize());
@@ -149,13 +152,38 @@ export class App {
     const m = this.match;
     const carrier = m.ball.owner !== null ? m.getPlayer(m.ball.owner) : null;
     const mine = carrier && player && carrier.id === player.id && !carrier.isGK;
+    const wasShooter = Boolean(this.layout.shooter);
     if (!mine || m.state !== STATES.PLAY) {
       this.layout.shooter = false;
+      if (wasShooter && m.state === STATES.PLAY) this.beginCameraTransition(false);
       return;
     }
     const goal = m.goalTargetFor(carrier);
     this.layout.shooter = isInShootingRange(carrier, goal);
     if (this.layout.shooter) this.layout.shotAnchor = { carrier, goal };
+    if (wasShooter !== this.layout.shooter) this.beginCameraTransition(this.layout.shooter);
+  }
+
+  // A camera move is a gameplay beat: briefly hold the action, then let it
+  // continue in slow motion while the shot framing settles.
+  beginCameraTransition(toShot) {
+    this.cameraTransition = {
+      remaining: CAMERA_TRANSITION_SECONDS,
+      total: CAMERA_TRANSITION_SECONDS,
+      hold: CAMERA_TRANSITION_HOLD,
+      toShot,
+    };
+  }
+
+  simulationDelta(dtReal) {
+    const transition = this.cameraTransition;
+    if (!transition || dtReal <= 0) return dtReal;
+    const elapsed = transition.total - transition.remaining;
+    transition.remaining = Math.max(0, transition.remaining - dtReal);
+    if (transition.remaining <= 0) this.cameraTransition = null;
+    if (elapsed < transition.hold) return 0;
+    const ramp = Math.min(1, (elapsed - transition.hold) / (transition.total - transition.hold));
+    return dtReal * (0.18 + ramp * 0.32);
   }
 
   // Whose eyes the first-person camera is looking through, and at what.
@@ -223,6 +251,7 @@ export class App {
     this.renderer3d.floats = [];
     this.renderer3d.resetCamera(this.match, this.layout);
     if (this.webgl) this.webgl.resetCamera(this.match, this.layout);
+    this.cameraTransition = null;
     this.updateLayerVisibility();
     this.overlay.hidden = true;
     this.overlay.innerHTML = '';
@@ -287,6 +316,9 @@ export class App {
       if (this.takePause()) {
         this.pause();
       } else {
+        // Detect a new shot framing before advancing the simulation so the
+        // first frame of a camera move gets the slow-motion treatment.
+        if (this.isAim) this.updateEye();
         if (this.isAim) this.feedAimInput();
         this.tickMatch(dtReal);
         if (this.match && this.match.pendingDecision) this.openDecision();
@@ -325,8 +357,9 @@ export class App {
 
   tickMatch(dtReal) {
     const m = this.match;
+    const simDt = this.isAim ? this.simulationDelta(dtReal) : dtReal;
     if (this.isAim) {
-      this.stepMatch(dtReal);
+      this.stepMatch(simDt);
       return;
     }
     // Feed input

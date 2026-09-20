@@ -8,7 +8,7 @@ export function drawHud(ctx, match, layout, { hint = null } = {}) {
   const t0 = match.teams[0];
   const t1 = match.teams[1];
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.62)';
+  ctx.fillStyle = 'rgba(9,11,24,0.88)';
   ctx.fillRect(hud.x, hud.y, hud.w, hud.h);
   const cy = hud.y + hud.h / 2;
   ctx.textBaseline = 'middle';
@@ -18,12 +18,13 @@ export function drawHud(ctx, match, layout, { hint = null } = {}) {
   ctx.fillStyle = t1.jersey.primary;
   ctx.fillRect(hud.w - 46, cy - 11, 16, 22);
 
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = '#f5f4e9';
   ctx.font = 'bold 21px system-ui, sans-serif';
   ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffd35c';
   ctx.fillText(`${t0.score} - ${t1.score}`, hud.w / 2, cy - 4);
   ctx.font = '600 12px system-ui, sans-serif';
-  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.fillStyle = 'rgba(245,244,233,0.72)';
   ctx.fillText(`${match.clockLabel()}  ·  H${match.clock.half}`, hud.w / 2, cy + 13);
 
   const nameW = Math.max(40, hud.w / 2 - 92);

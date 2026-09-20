@@ -4,7 +4,7 @@
 
 import { PITCH } from '../game/constants.js';
 
-const LINE = '#f2f6f2';
+const LINE = '#f5f4e9';
 
 function makeCanvas(w, h) {
   const c = document.createElement('canvas');
@@ -23,11 +23,11 @@ export function pitchTexture(THREE, { margin = 6, pxPerMetre = 18 } = {}) {
   const X = (x) => (x + margin) * pxPerMetre;
   const Y = (y) => (y + margin) * pxPerMetre;
 
-  ctx.fillStyle = '#3c8a46';
+  ctx.fillStyle = '#206c50';
   ctx.fillRect(0, 0, c.width, c.height);
   const stripes = 16;
   for (let i = 0; i < stripes; i++) {
-    ctx.fillStyle = i % 2 ? '#43964e' : '#3a8543';
+    ctx.fillStyle = i % 2 ? '#28795a' : '#1e634a';
     ctx.fillRect(X((i / stripes) * PITCH.length), 0, (PITCH.length / stripes) * pxPerMetre, c.height);
   }
   // A little wear towards the middle so the grass is not perfectly flat.
@@ -100,9 +100,9 @@ export function pitchTexture(THREE, { margin = 6, pxPerMetre = 18 } = {}) {
 export function crowdTexture(THREE) {
   const c = makeCanvas(1024, 512);
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#293a47';
+  ctx.fillStyle = '#171d35';
   ctx.fillRect(0, 0, c.width, c.height);
-  const colours = ['#d9d3c8', '#8fa3b5', '#c96d5a', '#e0c07a', '#6f8f9e', '#b7bcc6', '#7d6a86', '#5a6b78'];
+  const colours = ['#f5f4e9', '#8b85d9', '#ff6b5f', '#ffd35c', '#63e5ff', '#b6f36b', '#7463ff', '#43507d'];
   const rows = 30;
   const cols = 90;
   for (let r = 0; r < rows; r++) {

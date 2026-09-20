@@ -5,9 +5,9 @@
 import { PITCH, STATES } from '../game/constants.js';
 import { clamp } from '../game/vec.js';
 
-const GRASS_A = '#2f7d3a';
-const GRASS_B = '#2a7135';
-const LINE = 'rgba(255,255,255,0.85)';
+const GRASS_A = '#267254';
+const GRASS_B = '#1e6049';
+const LINE = 'rgba(245,244,233,0.86)';
 
 export class Renderer {
   constructor(canvas) {
@@ -24,7 +24,7 @@ export class Renderer {
     const ctx = this.ctx;
     const { w, h } = layout;
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#123018';
+    ctx.fillStyle = '#101429';
     ctx.fillRect(0, 0, w, h);
     this.drawPitch(ctx, layout);
     this.drawEntities(ctx, match, layout, opts);
@@ -51,7 +51,7 @@ export class Renderer {
       ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
     }
     // Surrounding margin
-    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.strokeStyle = 'rgba(255,211,92,0.2)';
     ctx.lineWidth = 1;
     ctx.strokeRect(L.pitch.x, L.pitch.y, L.pitch.w, L.pitch.h);
 
@@ -377,7 +377,7 @@ export class Renderer {
   drawHud(ctx, match, layout, opts) {
     const hud = layout.hud;
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.62)';
+    ctx.fillStyle = 'rgba(9,11,24,0.88)';
     ctx.fillRect(hud.x, hud.y, hud.w, hud.h);
     const cy = hud.y + hud.h / 2;
     const t0 = match.teams[0];
@@ -388,12 +388,13 @@ export class Renderer {
     ctx.fillRect(10, cy - 11, 16, 22);
     ctx.fillStyle = t1.jersey.primary;
     ctx.fillRect(hud.w - 46, cy - 11, 16, 22);
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = '#f5f4e9';
     ctx.font = 'bold 21px system-ui, sans-serif';
     ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd35c';
     ctx.fillText(`${t0.score} - ${t1.score}`, hud.w / 2, cy - 4);
     ctx.font = '600 12px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.fillStyle = 'rgba(245,244,233,0.72)';
     ctx.fillText(`${match.clockLabel()}  ·  H${match.clock.half}`, hud.w / 2, cy + 13);
     // Team names, clipped so they never reach the score or the pause button.
     const nameW = Math.max(40, hud.w / 2 - 92);
@@ -436,7 +437,7 @@ export class Renderer {
 
     // Pause button
     const pb = layout.pauseBtn;
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillStyle = 'rgba(116,99,255,0.6)';
     ctx.beginPath();
     ctx.arc(pb.cx, pb.cy, pb.r, 0, Math.PI * 2);
     ctx.fill();

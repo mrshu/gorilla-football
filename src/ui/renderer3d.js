@@ -7,13 +7,13 @@ import { PITCH, STATES } from '../game/constants.js';
 import { clamp } from '../game/vec.js';
 import { Camera, frameSideline, frameFirstPerson, sidelinePose, shootingPose, isInShootingRange, applyPose, blendPose } from './camera.js';
 
-const SKY_TOP = '#0f2233';
-const SKY_HORIZON = '#3d5f74';
-const GRASS_A = '#3a9247';
-const GRASS_B = '#347f3f';
-const LINE = 'rgba(255,255,255,0.9)';
-const STAND = '#1d2b36';
-const CROWD = ['#d9d3c8', '#8fa3b5', '#c96d5a', '#e0c07a', '#6f8f9e', '#b7bcc6', '#7d6a86'];
+const SKY_TOP = '#101429';
+const SKY_HORIZON = '#2b3158';
+const GRASS_A = '#267254';
+const GRASS_B = '#1e6049';
+const LINE = 'rgba(245,244,233,0.9)';
+const STAND = '#171d35';
+const CROWD = ['#f5f4e9', '#8b85d9', '#ff6b5f', '#ffd35c', '#63e5ff', '#b6f36b', '#7463ff'];
 
 // Deterministic 0..1 from two small integers: no allocation, no flicker.
 function hash2(a, b) {
@@ -28,6 +28,7 @@ export class Renderer3D {
     this.camera = new Camera();
     this.floats = [];
     this.smoothBall = null;
+    this.pose = null;
   }
 
   addFloat(text, world, color = '#fff') {
@@ -44,6 +45,7 @@ export class Renderer3D {
     this.camera.setViewport(layout.w, layout.h);
     if (layout.firstPerson && layout.eyePlayer) {
       frameFirstPerson(this.camera, layout.eyePlayer, this.smoothLook(layout, dt), layout.portrait);
+      this.applySmoothedPose(cameraPose(this.camera), dt);
       this.shotBlend = 0;
       return;
     }
@@ -51,15 +53,25 @@ export class Renderer3D {
     // easing between the two so it reads as a camera move, not a cut.
     const shooter = layout.shooter;
     const want = shooter ? 1 : 0;
-    const rate = 1 - Math.exp(-3.2 * Math.max(0, Math.min(dt, 0.2)));
+    const rate = 1 - Math.exp(-1.8 * Math.max(0, Math.min(dt, 0.2)));
     this.shotBlend = (this.shotBlend || 0) + (want - (this.shotBlend || 0)) * rate;
     const wide = sidelinePose(this.smoothBall, layout.viewAttackDir, layout.portrait);
     if (this.shotBlend < 0.01 || !layout.shotAnchor) {
-      applyPose(this.camera, wide);
+      this.applySmoothedPose(wide, dt);
       return;
     }
     const close = shootingPose(layout.shotAnchor.carrier, layout.shotAnchor.goal, layout.portrait);
-    applyPose(this.camera, blendPose(wide, close, this.shotBlend));
+    this.applySmoothedPose(blendPose(wide, close, this.shotBlend), dt);
+  }
+
+  applySmoothedPose(target, dt) {
+    if (!this.pose || dt >= 0.9) {
+      this.pose = target;
+    } else {
+      const amount = 1 - Math.exp(-1.65 * Math.max(0, Math.min(dt, 0.2)));
+      this.pose = blendPose(this.pose, target, amount);
+    }
+    applyPose(this.camera, this.pose);
   }
 
   // Prime the camera so input taken before the first frame is drawn still
@@ -78,6 +90,7 @@ export class Renderer3D {
   resetCamera(match, layout) {
     this.smoothBall = { ...match.ball.pos };
     this.smoothedLook = layout && layout.lookAt ? { ...layout.lookAt } : null;
+    this.pose = null;
     if (layout) this.updateCamera(match, layout, 1);
   }
 
@@ -107,7 +120,7 @@ export class Renderer3D {
     ctx.fillRect(0, 0, layout.w, Math.max(0, horizon));
     // Ground beyond the pitch: darker grass so the playing surface still reads
     // as the brightest thing on screen.
-    ctx.fillStyle = '#1f5c2a';
+    ctx.fillStyle = '#142f2b';
     ctx.fillRect(0, Math.max(0, horizon), layout.w, layout.h - Math.max(0, horizon));
   }
 
@@ -413,6 +426,64 @@ export class Renderer3D {
     ctx.fill();
     ctx.strokeStyle = 'rgba(0,0,0,0.4)';
     ctx.stroke();
+    const headX = px;
+    const shape = p.character.look.shape;
+    ctx.fillStyle = p.character.look.accent;
+    if (shape === 'gorilla') {
+      ctx.beginPath();
+      ctx.arc(headX - headR * 1.15, headY - headR * 0.15, headR * 0.55, 0, Math.PI * 2);
+      ctx.arc(headX + headR * 1.15, headY - headR * 0.15, headR * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = p.jersey.primary;
+      ctx.beginPath();
+      ctx.ellipse(px - w * 0.56, footY - legH - torsoH * 0.55, w * 0.36, torsoH * 0.58, 0, 0, Math.PI * 2);
+      ctx.ellipse(px + w * 0.56, footY - legH - torsoH * 0.55, w * 0.36, torsoH * 0.58, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (shape === 'tortoise') {
+      ctx.fillStyle = shade(p.character.look.accent, -0.15);
+      ctx.beginPath();
+      ctx.ellipse(px, footY - legH - torsoH * 0.5, w * 0.7, torsoH * 0.65, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (shape === 'wizard') {
+      ctx.beginPath();
+      ctx.moveTo(headX - headR * 1.1, headY - headR * 0.6);
+      ctx.lineTo(headX + headR * 1.1, headY - headR * 0.6);
+      ctx.lineTo(headX, headY - headR * 2.6);
+      ctx.closePath();
+      ctx.fill();
+    } else if (shape === 'rocket') {
+      ctx.fillStyle = p.character.look.accent;
+      ctx.beginPath();
+      ctx.moveTo(px - w * 0.55, footY - legH - torsoH * 0.25);
+      ctx.lineTo(px - w * 0.95, footY - legH - torsoH * 0.05);
+      ctx.lineTo(px - w * 0.5, footY - legH - torsoH * 0.52);
+      ctx.closePath();
+      ctx.fill();
+    } else if (shape === 'penguin') {
+      ctx.fillStyle = '#f5f4e9';
+      ctx.beginPath();
+      ctx.ellipse(px, footY - legH - torsoH * 0.54, w * 0.32, torsoH * 0.42, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = p.character.look.accent;
+      ctx.beginPath();
+      ctx.moveTo(headX, headY + headR * 0.2);
+      ctx.lineTo(headX + headR * 1.0, headY + headR * 0.45);
+      ctx.lineTo(headX, headY + headR * 0.7);
+      ctx.closePath();
+      ctx.fill();
+    } else if (shape === 'yeti') {
+      ctx.fillStyle = '#f5f4e9';
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.arc(headX + side * headR * 0.8, headY - headR * 0.1, headR * 0.75, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      ctx.fillStyle = p.character.look.accent;
+      ctx.beginPath();
+      ctx.ellipse(headX, headY - headR * 0.75, headR * 1.1, headR * 0.38, 0, Math.PI, Math.PI * 2);
+      ctx.fill();
+    }
     // Number on the shirt, only when big enough to read.
     if (torsoH > 11) {
       ctx.fillStyle = p.jersey.secondary;
@@ -692,6 +763,14 @@ function shade(hex, amount) {
     Math.round(clamp(amount < 0 ? c * (1 + amount) : c + (255 - c) * amount, 0, 255)),
   );
   return `rgb(${ch[0]},${ch[1]},${ch[2]})`;
+}
+
+function cameraPose(camera) {
+  return {
+    eye: { ...camera.eye },
+    target: { ...camera.target },
+    fov: (camera.fovY * 180) / Math.PI,
+  };
 }
 
 function strokePolyline(ctx, pts) {
