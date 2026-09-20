@@ -47,7 +47,9 @@ export function showHowTo(root, onBack) {
     <p>The kick itself is real football physics. A short line is driven along the grass hard enough to arrive and stop there; a long one is lifted and dropped on the spot. Draw further than your player can kick and it falls short, as it would.</p>
     <p>Bend the line and you put curl on the ball, so you can bend one round a defender.</p>
     <p>There is no separate pass and shoot. Draw a line that ends in the net and that was a shot.</p>
-    <p>The camera is <b>first person</b> by default: you look out from the player you are playing through. Switch to the broadcast camera in the setup screen if you would rather see more of the pitch.</p>
+    <p>Do nothing and your player just dribbles. Nothing is ever passed or shot for you, so every ball you play is one you drew. The other side will come and take it off you, though.</p>
+    <p>Once you carry the ball inside thirty metres of goal the camera drops in behind you, low and facing the goal, to line up the shot. A yellow tick marks where the game reckons the ball should go next.</p>
+    <p>The camera is a <b>side view</b> by default, the way football is televised. First person, looking out from your own player, is a setting on the pre-match screen.</p>
     <p>The player on the ball is ringed. If you leave them alone too long they will play it themselves, so the match never stalls.</p>
     <p>Restarts work the same way: aim and release to take the throw, corner, free kick or penalty.</p>
     <h4>One player</h4>

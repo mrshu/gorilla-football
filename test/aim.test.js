@@ -328,38 +328,38 @@ test('a whole-team match plays to full time while the human keeps shooting', () 
   assert.ok(kicks > 5, `expected the human to get the ball repeatedly, got ${kicks} kicks`);
 });
 
-test('your own carrier waits for you instead of shooting by itself', () => {
+test('with no input your player just dribbles, indefinitely', () => {
   const m = makeMatch({ seed: 15 });
   intoPlay(m);
   const p = m.teams[0].players[9];
-  p.pos = { x: 60, y: 34 };
+  p.pos = { x: 40, y: 34 };
   giveBall(m, p);
-  // Hold the ball for well under the grace period and give no input at all.
-  for (let i = 0; i < Math.round((AIM.holdGrace - 1.5) / PHYSICS.dt); i++) {
+  const start = { ...p.pos };
+  // Twenty seconds with nobody touching a control and nobody to challenge.
+  for (let i = 0; i < Math.round(20 / PHYSICS.dt); i++) {
+    for (const o of m.teams[1].players) if (!o.isGK) o.pos = { x: 8, y: 4 };
     m.step(PHYSICS.dt);
-    if (m.ball.owner === null) break;
-    // Keep opponents away so only the AI's own choice could release the ball.
-    for (const o of m.teams[1].players) if (!o.isGK) o.pos = { x: 15, y: 5 };
+    if (m.state !== STATES.PLAY) break;
+    assert.equal(m.ball.owner, p.id, `the ball was played for us after ${(i / 60).toFixed(1)} s`);
   }
-  assert.equal(m.ball.owner, p.id, 'the carrier should still be waiting for the human');
+  assert.ok(dist(start, p.pos) > 5, 'and they should actually be running with it, not standing still');
 });
 
-test('but the carrier plays on eventually so an idle match never stalls', () => {
+test('the opposition still take the ball off a dribbler, so play moves on', () => {
   const m = makeMatch({ seed: 15 });
   intoPlay(m);
   const p = m.teams[0].players[9];
-  p.pos = { x: 60, y: 34 };
+  p.pos = { x: 40, y: 34 };
   giveBall(m, p);
-  let released = false;
-  for (let i = 0; i < Math.round((AIM.holdGrace + 4) / PHYSICS.dt); i++) {
+  let lost = false;
+  for (let i = 0; i < Math.round(30 / PHYSICS.dt); i++) {
     m.step(PHYSICS.dt);
-    for (const o of m.teams[1].players) if (!o.isGK) o.pos = { x: 15, y: 5 };
-    if (m.ball.owner === null) {
-      released = true;
+    if (m.ball.owner !== p.id) {
+      lost = true;
       break;
     }
   }
-  assert.ok(released, 'the carrier should play the ball after the grace period');
+  assert.ok(lost, 'a dribbler with nobody helping should eventually be dispossessed');
 });
 
 test('the opposition decides for itself; only your side waits for you', () => {

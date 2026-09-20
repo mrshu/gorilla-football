@@ -74,6 +74,10 @@ included, runs themselves; your job is the ball.
 | **Tap an opponent** who has the ball | Get stuck in. |
 | **Draw a line** and release | The ball is struck towards where the line ended. |
 
+With no input at all your player simply keeps dribbling. The ball is never
+passed or shot on your behalf, so a pass only happens because you drew one.
+Play still moves, because the opposition close the dribbler down and take it.
+
 The kick is real football physics rather than the ball being dragged along your
 squiggle. A short line is driven along the grass hard enough to arrive and stop
 on the spot; a long one is lifted and dropped there. Draw further than your
@@ -86,9 +90,12 @@ screen you drew it. The ball is interceptible the whole way.
 There is no separate pass and shoot button. Draw a line that ends in the net and
 that was a shot.
 
-The camera is **first person** by default: you look out from the player you are
-playing through. The broadcast camera, raised and following the ball, is a
-setting on the pre-match screen.
+The camera is a **side view** by default, high in the side stand, the way
+football is televised. Carry the ball inside thirty metres of goal and it eases
+in behind you, low and facing the goal, to line up the shot. A yellow tick marks
+where the game reckons the ball should go next; it reads the same pass ranking
+the AI plays by. First person, looking out from your own player, is a setting on
+the pre-match screen.
 
 The player on the ball is ringed. Restarts work the same way: aim and release to
 take the throw, corner, free kick or penalty. Leave your carrier alone for six

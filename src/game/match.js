@@ -526,14 +526,15 @@ export class Match {
   }
 
   // May the AI play the ball off this carrier's foot, or must it wait for the
-  // person holding the phone? It waits, but not forever: after a grace period
-  // it plays on so an idle match still flows.
+  // person holding the phone?
+  //
+  // It waits, for as long as it takes. With no input your player simply keeps
+  // dribbling; the ball is never passed or shot on your behalf. Play still
+  // moves, because the opposition close them down and take it off them.
   aiMayActFor(p) {
     if (this.isAssisted(p)) return false;
     if (!this.aimControl || !this.isHumanTeam(p.team)) return true;
-    const hold = this.aimHold;
-    if (!hold || hold.playerId !== p.id) return false;
-    return this.time - hold.since > AIM.holdGrace;
+    return false;
   }
 
   // Who a human is "playing through" right now: their ball carrier, else the

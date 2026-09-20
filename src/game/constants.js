@@ -83,7 +83,6 @@ export const AIM = Object.freeze({
   loftScale: 11, // vertical speed per unit of power above loftPower
   maxDragPx: 170, // screen drag length that counts as full power
   tapPx: 14, // a drag shorter than this is a tap, not a kick
-  holdGrace: 6, // seconds a carrier waits for you before playing it themselves
   dribbleSpeed: 6.5, // m/s of the knock-on from a tap
   dribbleCooldown: 0.26, // seconds before the carrier can take the ball again
   dribbleBoost: 0.5, // seconds of extra pace to chase their own touch
