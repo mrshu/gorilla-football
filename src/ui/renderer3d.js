@@ -303,9 +303,10 @@ export class Renderer3D {
   drawGoal(ctx, side) {
     const x = side < 0 ? 0 : PITCH.length;
     const back = x - side * -PITCH.goalDepth; // behind the line
-    const hw = PITCH.goalWidth / 2;
+    const postRadius = 0.06;
+    const hw = PITCH.goalWidth / 2 + postRadius;
     const hy = PITCH.width / 2;
-    const h = PITCH.goalHeight;
+    const h = PITCH.goalHeight + postRadius;
     const posts = [
       [{ x, y: hy - hw, z: 0 }, { x, y: hy - hw, z: h }],
       [{ x, y: hy + hw, z: 0 }, { x, y: hy + hw, z: h }],

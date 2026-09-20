@@ -19,6 +19,8 @@ export class RendererWebGL {
     this.camera = new Camera(); // shared with input; the source of truth
     this.smoothBall = null;
     this.playerViews = new Map();
+    this.spriteTextures = new Map();
+    this.spriteGeometry = new THREE.PlaneGeometry(2 / 3, 1);
     this.pose = null;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
@@ -42,6 +44,7 @@ export class RendererWebGL {
     this.buildFloodlights();
     this.buildGoals();
     this.buildBall();
+    this.loadPlayerSprites();
   }
 
   // ------------------------------------------------------------- scenery
@@ -184,10 +187,13 @@ export class RendererWebGL {
     const { THREE, scene } = this;
     const post = new THREE.MeshLambertMaterial({ color: '#ffffff' });
     const net = new THREE.MeshLambertMaterial({ color: '#dfe8ef', transparent: true, opacity: 0.22, side: THREE.DoubleSide });
-    // Regulation goalposts are roughly 12 cm in diameter.
+    // Regulation goalposts are roughly 12 cm in diameter. Keep the *inside*
+    // of the frame at the regulation dimensions, rather than putting the
+    // post centers on the dimension lines and shrinking the visible opening.
     const r = 0.06;
-    const hw = PITCH.goalWidth / 2;
-    const h = PITCH.goalHeight;
+    const hw = PITCH.goalWidth / 2 + r;
+    const frameWidth = PITCH.goalWidth + r * 2;
+    const h = PITCH.goalHeight + r;
     const d = PITCH.goalDepth;
     for (const side of [-1, 1]) {
       const x = side < 0 ? 0 : PITCH.length;
@@ -203,13 +209,13 @@ export class RendererWebGL {
       };
       bar(h, toThree(THREE, x, PITCH.width / 2 - hw, h / 2), 'y');
       bar(h, toThree(THREE, x, PITCH.width / 2 + hw, h / 2), 'y');
-      bar(PITCH.goalWidth, toThree(THREE, x, PITCH.width / 2, h), 'z');
+      bar(frameWidth, toThree(THREE, x, PITCH.width / 2, h), 'z');
       // Net: back panel and roof.
-      const back = new THREE.Mesh(new THREE.PlaneGeometry(PITCH.goalWidth, h), net);
+      const back = new THREE.Mesh(new THREE.PlaneGeometry(frameWidth, h), net);
       back.position.copy(toThree(THREE, x - inward * d, PITCH.width / 2, h / 2));
       back.rotation.y = side < 0 ? -Math.PI / 2 : Math.PI / 2;
       g.add(back);
-      const roof = new THREE.Mesh(new THREE.PlaneGeometry(PITCH.goalWidth, d), net);
+      const roof = new THREE.Mesh(new THREE.PlaneGeometry(frameWidth, d), net);
       roof.position.copy(toThree(THREE, x - inward * d / 2, PITCH.width / 2, h));
       roof.rotation.x = -Math.PI / 2;
       g.add(roof);
@@ -241,6 +247,99 @@ export class RendererWebGL {
     this.ballShadow = blob;
   }
 
+  // High-quality ImageGen cutouts are the primary broadcast character view.
+  // They live as real world-space planes inside the Three.js scene, so they
+  // still depth-test, scale with the pitch, and move with the simulation.
+  loadPlayerSprites() {
+    const shapes = ['gorilla', 'plumber', 'tortoise', 'rocket', 'wizard', 'penguin', 'yeti'];
+    const loads = shapes.map((shape) => new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () => {
+        const texture = new this.THREE.Texture(image);
+        texture.needsUpdate = true;
+        texture.minFilter = this.THREE.LinearFilter;
+        texture.magFilter = this.THREE.LinearFilter;
+        texture.generateMipmaps = true;
+        if (this.THREE.sRGBEncoding !== undefined) texture.encoding = this.THREE.sRGBEncoding;
+        this.spriteTextures.set(shape, texture);
+        resolve();
+      };
+      image.onerror = () => resolve();
+      image.src = `public/assets/player-sprite-${shape}.png`;
+    }));
+    Promise.all(loads).then(() => this.invalidatePlayerViews());
+  }
+
+  removePlayerView(view) {
+    if (!view) return;
+    this.scene.remove(view.group);
+    if (view.shadow) this.scene.remove(view.shadow);
+  }
+
+  invalidatePlayerViews() {
+    for (const view of this.playerViews.values()) this.removePlayerView(view);
+    this.playerViews.clear();
+  }
+
+  spritePlayerView(p, signature, size) {
+    const { THREE, scene } = this;
+    const texture = this.spriteTextures.get(p.character.look.shape);
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        map: { value: texture },
+        primary: { value: new THREE.Color(p.jersey.primary) },
+        secondary: { value: new THREE.Color(p.jersey.secondary) },
+      },
+      vertexShader: PLAYER_SPRITE_VERTEX,
+      fragmentShader: PLAYER_SPRITE_FRAGMENT,
+      transparent: true,
+      alphaTest: 0.08,
+      depthTest: true,
+      depthWrite: true,
+      side: THREE.DoubleSide,
+    });
+    const plane = new THREE.Mesh(this.spriteGeometry, material);
+    const height = 1.82 + (p.character.look.size - 1) * 0.32;
+    plane.position.y = height * 0.5;
+    plane.scale.setScalar(height);
+    plane.castShadow = false;
+    const group = new THREE.Group();
+    group.add(plane);
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.58 * size, 0.76 * size, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd35c, transparent: true, opacity: 0.92, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.03;
+    ring.visible = false;
+    group.add(ring);
+
+    const shadow = new THREE.Mesh(
+      new THREE.CircleGeometry(0.32 * size, 18),
+      new THREE.MeshBasicMaterial({ color: 0x02030a, transparent: true, opacity: 0.24, depthWrite: false }),
+    );
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.scale.set(1.45, 0.58, 1);
+    scene.add(group, shadow);
+
+    const view = {
+      kind: 'sprite',
+      group,
+      plane,
+      ring,
+      shadow,
+      material,
+      phase: Math.random() * Math.PI * 2,
+      bob: 0,
+      height,
+      size,
+      signature,
+    };
+    this.playerViews.set(p.id, view);
+    return view;
+  }
+
   // -------------------------------------------------------------- players
 
   // A stylized footballer built from low-poly primitives. The base rig is
@@ -254,12 +353,13 @@ export class RendererWebGL {
     // Matches can be restarted with a different character or kit while the
     // renderer lives on. Rebuild that player's visual instead of leaving the
     // previous model cached under the same simulation id.
-    if (view) scene.remove(view.group);
+    if (view) this.removePlayerView(view);
     const look = p.character.look;
     const shape = look.shape;
     // Keep species readable without letting the old look-size range turn
     // ordinary players into giants next to a regulation goal.
     const size = 1 + (look.size - 1) * 0.45;
+    if (this.spriteTextures.has(shape)) return this.spritePlayerView(p, signature, size);
     const S = (n) => n * size;
     const group = new THREE.Group();
 
@@ -462,6 +562,7 @@ export class RendererWebGL {
 
   // Swing the limbs in time with how fast the player is actually moving.
   animate(view, p, dt) {
+    if (view.kind === 'sprite') return this.animateSprite(view, p, dt);
     const speed = Math.hypot(p.vel.x, p.vel.y);
     view.phase += speed * dt * 1.7;
     const swing = Math.min(1, speed / 7) * 0.85;
@@ -477,6 +578,25 @@ export class RendererWebGL {
     view.head.rotation.z = Math.sin(view.phase * 2) * 0.025;
     // Lean into a sprint, and fall flat when sliding.
     view.group.rotation.x = p.sliding > 0 ? -1.15 : -Math.min(0.22, speed * 0.022);
+  }
+
+  animateSprite(view, p, dt) {
+    const speed = Math.hypot(p.vel.x, p.vel.y);
+    view.phase += dt * Math.max(1.6, Math.min(12, speed * 2.1));
+    const moving = speed > 0.7;
+    const slide = p.sliding > 0;
+    const stride = moving ? Math.sin(view.phase) * 0.012 : 0;
+    const height = view.height;
+    view.plane.position.y = slide ? height * 0.28 : height * 0.5;
+    view.plane.scale.set(height, height * (slide ? 0.56 : 1), height);
+    view.plane.rotation.z = slide ? (p.facing.x >= 0 ? -0.58 : 0.58) : stride;
+    view.bob = slide ? 0 : Math.sin(view.phase * 2) * Math.min(0.025, speed * 0.0025);
+  }
+
+  faceSpriteToCamera(view) {
+    const dx = this.three.position.x - view.group.position.x;
+    const dz = this.three.position.z - view.group.position.z;
+    view.group.rotation.set(0, Math.atan2(dx, dz), 0);
   }
 
   // ---------------------------------------------------------------- frame
@@ -572,19 +692,28 @@ export class RendererWebGL {
       const view = this.playerView(p);
       if (p.sentOff) {
         view.group.visible = false;
+        if (view.shadow) view.shadow.visible = false;
         continue;
       }
       // In first person you are inside this player's head; drawing them would
       // fill the screen with the back of their own shirt.
       if (layout.firstPerson && layout.eyePlayer && layout.eyePlayer.id === p.id) {
         view.group.visible = false;
+        if (view.shadow) view.shadow.visible = false;
         continue;
       }
       view.group.visible = true;
+      if (view.shadow) {
+        view.shadow.visible = true;
+        view.shadow.position.copy(toThree(THREE, p.pos.x, p.pos.y, 0.025));
+      }
       view.group.position.copy(toThree(THREE, p.pos.x, p.pos.y, 0));
-      // Face the way they are running.
-      const f = p.facing;
-      view.group.rotation.y = Math.atan2(f.x, -f.y) - Math.PI / 2;
+      if (view.kind === 'sprite') this.faceSpriteToCamera(view);
+      else {
+        // Face the way they are running.
+        const f = p.facing;
+        view.group.rotation.y = Math.atan2(f.x, -f.y) - Math.PI / 2;
+      }
       this.animate(view, p, opts.dt || 0);
       view.group.position.y += view.bob;
       const controlled = opts.controlledIds && opts.controlledIds.has(p.id);
@@ -607,6 +736,41 @@ export class RendererWebGL {
     this.renderer.dispose();
   }
 }
+
+// The generated cutouts use a neutral navy kit. Recolour only the blue kit
+// pixels, preserving fur, skin, eyes, boots, and the baked studio shading.
+const PLAYER_SPRITE_VERTEX = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const PLAYER_SPRITE_FRAGMENT = `
+  uniform sampler2D map;
+  uniform vec3 primary;
+  uniform vec3 secondary;
+  varying vec2 vUv;
+
+  vec3 tint(vec3 source, vec3 target) {
+    float luminance = dot(source, vec3(0.2126, 0.7152, 0.0722));
+    return target * mix(0.55, 1.12, luminance);
+  }
+
+  void main() {
+    vec4 texel = texture2D(map, vUv);
+    if (texel.a < 0.06) discard;
+    float blue = smoothstep(0.055, 0.22, texel.b - max(texel.r, texel.g) * 0.72);
+    float shirt = blue * smoothstep(0.43, 0.53, vUv.y) * (1.0 - smoothstep(0.74, 0.84, vUv.y));
+    float shorts = blue * smoothstep(0.22, 0.31, vUv.y) * (1.0 - smoothstep(0.44, 0.52, vUv.y));
+    float socks = blue * smoothstep(0.035, 0.10, vUv.y) * (1.0 - smoothstep(0.25, 0.34, vUv.y));
+    vec3 color = texel.rgb;
+    color = mix(color, tint(color, primary), shirt + shorts);
+    color = mix(color, tint(color, secondary), socks);
+    gl_FragColor = vec4(color, texel.a);
+  }
+`;
 
 function shade(hex, amount) {
   const n = parseInt(hex.slice(1), 16);
