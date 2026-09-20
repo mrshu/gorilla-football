@@ -56,6 +56,15 @@ export function updateOutfieldAI(match, p, dt) {
     p.desiredVel = { x: 0, y: 0 };
     return;
   }
+  // A tapped destination overrides where the AI would have gone. The player
+  // still carries the ball, so an order while on the ball is a dribble to
+  // that spot rather than an instruction to abandon it.
+  const order = match.moveOrderFor ? match.moveOrderFor(p) : null;
+  if (order) {
+    moveTo(match, p, order, 1);
+    if (match.ball.owner === p.id) p.facing = norm(sub(order, p.pos));
+    return;
+  }
   if (ball.owner === p.id) return carryBall(match, p, dt);
   if (ball.homing && ball.homing.playerId === p.id) {
     moveTo(match, p, ball.pos, 1);

@@ -36,6 +36,7 @@ export class Match {
     this.aimKicks = config.humans.map(() => null);
     this.presses = config.humans.map(() => false);
     this.dribbles = config.humans.map(() => false);
+    this.moveOrders = config.humans.map(() => null); // { playerId, point }
     this.aimHold = null; // { playerId, since } while a human's team carries
     this.pendingDecision = null;
     this.decisionCarry = null;
@@ -213,7 +214,7 @@ export class Match {
     const ball = this.ball;
     ball.owner = null;
     ball.homing = null;
-    ball.path = null;
+    ball.spin = 0;
     ball.unstoppable = false;
     ball.vel = { x: 0, y: 0 };
     ball.z = 0;
@@ -486,7 +487,18 @@ export class Match {
     this.checkOutOfPlay();
     if (this.state !== STATES.PLAY) return;
     this.trackAimHold();
+    if (this.aimControl) this.pruneMoveOrders();
     this.maybeOpenDecision(prevOwner);
+  }
+
+  // Drop orders whose player is no longer the one you are playing through.
+  pruneMoveOrders() {
+    for (let i = 0; i < this.moveOrders.length; i++) {
+      const order = this.moveOrders[i];
+      if (!order) continue;
+      const active = this.activePlayerFor(i);
+      if (!active || active.id !== order.playerId) this.moveOrders[i] = null;
+    }
   }
 
   trackAimHold() {
@@ -579,15 +591,52 @@ export class Match {
     return true;
   }
 
-  // A tap with no aim: push the ball on if you have it, close them down if
-  // you do not.
-  tap(humanIndex) {
+  // A tap on the grass is an order: go there. The player you are playing
+  // through runs to the spot, carrying the ball if they have it. Tapping
+  // somebody down is what happens when you tap the opposition's carrier.
+  tap(humanIndex, point = null) {
     if (!this.aimControl) return false;
-    if (this.canDribble(humanIndex)) {
-      this.dribbles[humanIndex] = true;
-      return true;
+    if (!point) {
+      // No place named: fall back to closing down or knocking the ball on.
+      if (this.canDribble(humanIndex)) {
+        this.dribbles[humanIndex] = true;
+        return true;
+      }
+      return this.press(humanIndex);
     }
-    return this.press(humanIndex);
+    const player = this.activePlayerFor(humanIndex);
+    if (!player) return false;
+    const carrier = this.ball.owner !== null ? this.getPlayer(this.ball.owner) : null;
+    const theirs = carrier && carrier.team !== player.team;
+    // Tapping right on top of an opponent with the ball means "get stuck in".
+    if (theirs && dist(point, carrier.pos) < AIM.moveOrderRadius * 2) return this.press(humanIndex);
+    this.moveOrders[humanIndex] = {
+      playerId: player.id,
+      point: {
+        x: clamp(point.x, 0.5, PITCH.length - 0.5),
+        y: clamp(point.y, 0.5, PITCH.width - 0.5),
+      },
+    };
+    this.emit('moveorder', { playerId: player.id, humanIndex, point: this.moveOrders[humanIndex].point });
+    return true;
+  }
+
+  // The standing order for this player, or null. Cleared once they arrive.
+  moveOrderFor(player) {
+    for (let i = 0; i < this.moveOrders.length; i++) {
+      const order = this.moveOrders[i];
+      if (!order || order.playerId !== player.id) continue;
+      if (dist(player.pos, order.point) <= AIM.moveOrderRadius) {
+        this.moveOrders[i] = null;
+        return null;
+      }
+      return order.point;
+    }
+    return null;
+  }
+
+  clearMoveOrder(humanIndex) {
+    this.moveOrders[humanIndex] = null;
   }
 
   canDribble(humanIndex) {
@@ -691,18 +740,53 @@ export class Match {
     if (towardsGoal) this.emit('shot', { playerId: kicker.id, team: kicker.team });
   }
 
-  // Send the ball along the line that was drawn. The path is anchored to the
-  // ball, so what you draw is the shape of the pass, not where on the pitch
-  // you happened to draw it. The ball is interceptible the whole way.
-  playBallAlongPath(kicker, drawn, { setPieceKind = null } = {}) {
+  // Work out the kick that lands the ball where the line was drawn.
+  //
+  // The drawing names a target and a shape; the ball then flies by the same
+  // physics as any other ball. A short line is driven along the grass hard
+  // enough to arrive and stop there; a long one is lifted and dropped on the
+  // spot. If the kicker is not strong enough to reach, they hit it as hard as
+  // they can and it falls short, which is what would really happen. A line
+  // that bulges sideways puts curl on it.
+  planKick(kicker, drawn) {
     const start = { ...this.ball.pos };
     const anchored = anchorPath(drawn, start);
-    const length = pathLength(anchored);
-    // A long stroke is a harder ball, the way a longer backlift is.
-    const power = clamp(length / AIM.pathFullPowerMetres, 0.12, 1);
-    const speed = AIM.minSpeed + power * (kicker.phys.shotSpeed - AIM.minSpeed);
-    const first = anchored[1] || anchored[0];
-    const dir = norm(sub(first, start));
+    const target = anchored[anchored.length - 1];
+    const to = sub(target, start);
+    const distance = len(to);
+    const dir = distance > 1e-6 ? scale(to, 1 / distance) : { x: this.teams[kicker.team].attackDir, y: 0 };
+    const maxSpeed = kicker.phys.shotSpeed;
+
+    let speed;
+    let vz = 0;
+    if (distance <= AIM.groundPassMax) {
+      // Rolling: friction has to eat exactly this much distance.
+      speed = Math.sqrt(2 * PHYSICS.ballRollFriction * Math.max(distance, 1));
+    } else {
+      // Lifted: a projectile launched at a fixed angle that lands on the spot.
+      const g = PHYSICS.gravity;
+      const a = AIM.loftAngle;
+      const launch = Math.sqrt((distance * g) / Math.max(0.2, Math.sin(2 * a)));
+      speed = launch * Math.cos(a);
+      vz = launch * Math.sin(a);
+      if (launch > maxSpeed) {
+        // Cannot reach: hit it as hard as they can at the same angle.
+        speed = maxSpeed * Math.cos(a);
+        vz = maxSpeed * Math.sin(a);
+      }
+    }
+    speed = Math.min(speed, maxSpeed);
+    return { dir, speed, vz, distance, target, spin: drawnCurl(anchored) };
+  }
+
+  playBallAlongPath(kicker, drawn, { setPieceKind = null } = {}) {
+    const plan = this.planKick(kicker, drawn);
+    // Aim is not perfect: a harder kick and a weaker striker stray more.
+    const effort = plan.speed / Math.max(1, kicker.phys.shotSpeed);
+    const spread = (AIM.baseSpread + effort * AIM.powerSpread) * (0.55 + kicker.phys.shotSpread);
+    const dir = fromAngle(angle(plan.dir) + this.rng.gaussian() * spread);
+    const speed = plan.speed;
+    const target = plan.target;
 
     if (setPieceKind) {
       this.state = STATES.PLAY;
@@ -712,8 +796,7 @@ export class Match {
       kicker.kickCooldown = 0;
     }
     const goal = goalCenter(this.teams[kicker.team].attackDir);
-    const last = anchored[anchored.length - 1];
-    const towardsGoal = dist(last, goal) < 6 && dist(kicker.pos, goal) < 46;
+    const towardsGoal = dist(target, goal) < 7 && dist(kicker.pos, goal) < 46;
     if (towardsGoal) {
       this.stats.shots[kicker.team]++;
       this.emit('shot', { playerId: kicker.id, team: kicker.team });
@@ -722,10 +805,11 @@ export class Match {
     this.ball.owner = null;
     this.ball.homing = null;
     this.ball.unstoppable = false;
-    this.ball.z = 0;
-    this.ball.vz = 0;
+    this.ball.pos = add(kicker.pos, scale(dir, PHYSICS.playerRadius + PHYSICS.ballRadius + 0.1));
+    this.ball.z = plan.vz > 0 ? 0.08 : 0;
+    this.ball.vz = plan.vz;
     this.ball.vel = scale(dir, speed);
-    this.ball.path = { points: anchored.slice(1), index: 0, speed };
+    this.ball.spin = plan.spin;
     kicker.kickCooldown = PHYSICS.kickCooldown;
     kicker.facing = dir;
     kicker.holdingBall = 0;
@@ -982,7 +1066,7 @@ export class Match {
     }
     ball.owner = p.id;
     ball.homing = null;
-    ball.path = null;
+    ball.spin = 0;
     ball.unstoppable = false;
     ball.vel = { ...p.vel };
     ball.z = 0;
@@ -1089,7 +1173,7 @@ export class Match {
     const d = len(dir) > 0.01 ? norm(dir) : { x: this.teams[p.team].attackDir, y: 0 };
     ball.owner = null;
     ball.homing = null;
-    ball.path = null;
+    ball.spin = 0;
     ball.unstoppable = false;
     ball.pos = add(p.pos, scale(d, PHYSICS.playerRadius + PHYSICS.ballRadius + 0.1));
     ball.vel = scale(d, Math.min(speed, PHYSICS.maxBallSpeed));
@@ -1482,10 +1566,6 @@ export class Match {
   integrateBall(dt) {
     const ball = this.ball;
     if (ball.owner !== null) return;
-    if (ball.path) {
-      this.followPath(dt);
-      return;
-    }
     if (ball.homing) {
       const target = ball.homing.point || this.getPlayer(ball.homing.playerId).pos;
       const to = sub(target, ball.pos);
@@ -1519,6 +1599,19 @@ export class Match {
         ball.vel = scale(ball.vel, ns / speed);
       }
     }
+    // Swerve: a spinning ball is pushed sideways, hardest when it is moving
+    // fastest, and the spin bleeds off as it travels. This is what makes a
+    // curved line produce a curling ball instead of a bent one.
+    if (ball.spin !== 0) {
+      const speed = len(ball.vel);
+      if (speed > 0.5) {
+        const side = { x: -ball.vel.y / speed, y: ball.vel.x / speed };
+        const a = PHYSICS.ballMagnus * ball.spin * speed;
+        ball.vel = add(ball.vel, scale(side, a * dt));
+      }
+      ball.spin *= Math.max(0, 1 - PHYSICS.ballSpinDecay * dt);
+      if (Math.abs(ball.spin) < 0.02) ball.spin = 0;
+    }
     ball.vel = clampLen(ball.vel, PHYSICS.maxBallSpeed);
     ball.pos = add(ball.pos, scale(ball.vel, dt));
     // Goal frame: bounce off posts/bar crudely -> treat as goal line handled by rules; bounce off net back.
@@ -1533,39 +1626,6 @@ export class Match {
         break;
       }
     }
-  }
-
-  // Walk the ball along the remaining points of a drawn path. Distance per
-  // frame comes from the path's speed, so a long stroke is not slower than a
-  // short one; only the drawn shape decides where it goes.
-  followPath(dt) {
-    const ball = this.ball;
-    const path = ball.path;
-    let budget = path.speed * dt;
-    while (budget > 0 && path.index < path.points.length) {
-      const target = path.points[path.index];
-      const to = sub(target, ball.pos);
-      const d = len(to);
-      if (d <= 1e-6) {
-        path.index++;
-        continue;
-      }
-      const dir = scale(to, 1 / d);
-      if (d > budget) {
-        ball.pos = add(ball.pos, scale(dir, budget));
-        ball.vel = scale(dir, path.speed);
-        budget = 0;
-      } else {
-        ball.pos = { ...target };
-        ball.vel = scale(dir, path.speed);
-        budget -= d;
-        path.index++;
-      }
-    }
-    ball.z = 0;
-    ball.vz = 0;
-    // The path is spent: the ball rolls on in the direction it was last going.
-    if (path.index >= path.points.length) ball.path = null;
   }
 
   checkOutOfPlay() {
@@ -1594,7 +1654,7 @@ export class Match {
     this.pendingKickoffTeam = 1 - teamIdx;
     this.ball.owner = null;
     this.ball.homing = null;
-    this.ball.path = null;
+    this.ball.spin = 0;
     this.ball.unstoppable = false;
     this.ball.vel = { x: 0, y: 0 };
     for (const p of this.players) p.desiredVel = { x: 0, y: 0 };
@@ -1604,7 +1664,7 @@ export class Match {
     this.clock.time = this.clock.halfSeconds;
     this.ball.owner = null;
     this.ball.homing = null;
-    this.ball.path = null;
+    this.ball.spin = 0;
     this.ball.vel = { x: 0, y: 0 };
     this.setPiece = null;
     if (this.clock.half === 1) {
@@ -1651,4 +1711,24 @@ function pathLength(points) {
   let total = 0;
   for (let i = 1; i < points.length; i++) total += dist(points[i - 1], points[i]);
   return total;
+}
+
+// How much a drawn line bulges sideways of the straight chord between its
+// ends, signed, as a spin value. A straight line curls nothing.
+function drawnCurl(points) {
+  if (points.length < 3) return 0;
+  const a = points[0];
+  const b = points[points.length - 1];
+  const chord = sub(b, a);
+  const l = len(chord);
+  if (l < 2) return 0;
+  const dir = scale(chord, 1 / l);
+  let worst = 0;
+  for (const p of points) {
+    const rel = sub(p, a);
+    // Signed perpendicular distance from the chord.
+    const off = rel.x * dir.y - rel.y * dir.x;
+    if (Math.abs(off) > Math.abs(worst)) worst = off;
+  }
+  return clamp(worst * AIM.curlPerMetre, -AIM.curlMax, AIM.curlMax);
 }

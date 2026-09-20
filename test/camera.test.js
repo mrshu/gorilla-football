@@ -125,3 +125,68 @@ test('both goals and the halfway line stay in front of the camera', () => {
     assert.ok(goal.visible, 'the attacked goal should be in view from the halfway line');
   }
 });
+
+// ------------------------------------------------------------- first person
+
+import { frameFirstPerson, FIRST_PERSON } from '../src/ui/camera.js';
+
+const player = (x, y, fx = 1, fy = 0, size = 1) => ({
+  pos: { x, y },
+  facing: { x: fx, y: fy },
+  character: { look: { size } },
+});
+
+test('the first-person eye sits at head height, a stride behind the player', () => {
+  const c = cam(430, 932);
+  const p = player(40, 34);
+  frameFirstPerson(c, p, { x: 70, y: 34 }, true);
+  assert.ok(Math.abs(c.eye.z - FIRST_PERSON.eyeHeight) < 0.01, `eye height ${c.eye.z}`);
+  // Behind the player, along their facing, by about a stride.
+  const behind = p.pos.x - c.eye.x;
+  assert.ok(behind > 0.5 && behind < 4, `eye should be just behind, got ${behind}`);
+  assert.ok(Math.abs(c.eye.y - p.pos.y) < 0.01);
+});
+
+test('a bigger character sees from higher up', () => {
+  const small = cam(430, 932);
+  const big = cam(430, 932);
+  frameFirstPerson(small, player(40, 34, 1, 0, 0.9), { x: 70, y: 34 }, true);
+  frameFirstPerson(big, player(40, 34, 1, 0, 1.35), { x: 70, y: 34 }, true);
+  assert.ok(big.eye.z > small.eye.z, 'the Gorilla should look down on the Penguin');
+});
+
+test('the first-person view looks at what it was told to look at', () => {
+  const c = cam(430, 932);
+  frameFirstPerson(c, player(40, 34), { x: 40, y: 60 }, true);
+  // Target is off to +y, so the view direction must be mostly +y.
+  const dir = { x: c.target.x - c.eye.x, y: c.target.y - c.eye.y };
+  const l = Math.hypot(dir.x, dir.y);
+  assert.ok(dir.y / l > 0.9, `expected to face +y, got ${JSON.stringify(dir)}`);
+});
+
+test('the view is pitched down so the ground in front is visible', () => {
+  const c = cam(430, 932);
+  frameFirstPerson(c, player(40, 34), { x: 70, y: 34 }, true);
+  assert.ok(c.target.z < c.eye.z, 'the camera should look downwards');
+  // The ball at the player's feet should project inside the canvas.
+  const ball = c.project({ x: 40.8, y: 34, z: 0.22 });
+  assert.ok(ball.visible, 'the ball at your feet must be in front of the camera');
+  assert.ok(ball.y > 0 && ball.y < 932, `ball at your feet is off screen (y=${ball.y})`);
+});
+
+test('a very close look target does not make the view swing about', () => {
+  const c = cam(430, 932);
+  const p = player(40, 34);
+  // Something almost on top of the player.
+  frameFirstPerson(c, p, { x: 40.1, y: 34.05 }, true);
+  const reach = Math.hypot(c.target.x - c.eye.x, c.target.y - c.eye.y);
+  assert.ok(reach >= FIRST_PERSON.minLook - 0.01, `look distance collapsed to ${reach}`);
+});
+
+test('the ground under the crosshair unprojects back to the pitch', () => {
+  const c = cam(430, 932);
+  frameFirstPerson(c, player(30, 34), { x: 60, y: 34 }, true);
+  const g = c.screenToGround(215, 700);
+  assert.ok(g, 'the lower half of the screen should be grass');
+  assert.ok(g.x > 25 && g.x < 105, `unprojected to ${g.x}, off the pitch`);
+});

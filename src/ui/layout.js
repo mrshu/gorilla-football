@@ -39,7 +39,7 @@ function buttonCluster(cx, cy, br, flip, bounds) {
 // both face the screen the same way up instead of sitting at opposite ends.
 // Whole-team play needs no on-screen controls at all: the whole canvas is the
 // control. Two humans split it so each has their own touch area.
-export function computeAimLayout(w, h, humanCount, viewAttackDir) {
+export function computeAimLayout(w, h, humanCount, viewAttackDir, firstPerson = false) {
   const portrait = h > w;
   const hud = { x: 0, y: 0, w, h: HUD_H };
   const zones = humanCount < 2
@@ -60,6 +60,9 @@ export function computeAimLayout(w, h, humanCount, viewAttackDir) {
     humanCount,
     aim: true,
     viewAttackDir,
+    firstPerson,
+    eyePlayer: null, // filled in each frame by the app
+    lookAt: null,
     zones,
     hud,
     controls: [],

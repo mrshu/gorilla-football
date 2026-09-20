@@ -70,19 +70,25 @@ included, runs themselves; your job is the ball.
 
 | Touch | What happens |
 | --- | --- |
-| **Tap**, with the ball | Dribble: knock it into space ahead and chase it. |
-| **Tap**, without the ball | Close the carrier down. |
-| **Draw a line** with your finger | The line appears on the grass. That is the route the ball will take. |
-| **Release** | The ball sets off along the line you drew. |
+| **Tap the grass** | Your player runs there, dribbling the ball if they have it. |
+| **Tap an opponent** who has the ball | Get stuck in. |
+| **Draw a line** and release | The ball is struck towards where the line ended. |
 
-You are not aiming in a straight line: you are **drawing the pass**. Curve the
-line around a defender and the ball curves around the defender. The shape is
-what matters, not where on the screen you drew it, because the line is anchored
-to the ball. A longer line means a harder ball, and the ball is interceptible
-the whole way, so a route through a crowd is a gamble.
+The kick is real football physics rather than the ball being dragged along your
+squiggle. A short line is driven along the grass hard enough to arrive and stop
+on the spot; a long one is lifted and dropped there. Draw further than your
+player can kick and it falls short, as it would. Bend the line and you put curl
+on the ball, so you can bend one round a defender.
+
+The line is anchored to the ball, so the shape is what counts, not where on the
+screen you drew it. The ball is interceptible the whole way.
 
 There is no separate pass and shoot button. Draw a line that ends in the net and
 that was a shot.
+
+The camera is **first person** by default: you look out from the player you are
+playing through. The broadcast camera, raised and following the ball, is a
+setting on the pre-match screen.
 
 The player on the ball is ringed. Restarts work the same way: aim and release to
 take the throw, corner, free kick or penalty. Leave your carrier alone for six

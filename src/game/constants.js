@@ -20,6 +20,8 @@ export const PITCH = Object.freeze({
 });
 
 export const PHYSICS = Object.freeze({
+  ballSpinDecay: 0.55, // per second, how quickly swerve bleeds off
+  ballMagnus: 0.55, // sideways acceleration per unit of spin and speed
   dt: 1 / 60,
   playerRadius: 0.55,
   ballRadius: 0.22,
@@ -89,6 +91,13 @@ export const AIM = Object.freeze({
   pathMaxPoints: 120, // cap on the length of a drawn path
   pathMargin: 6, // how far outside the pitch a drawn path may reach
   pathFullPowerMetres: 45, // stroke length on the grass that means full power
+  // A drawn line names a target. The kick that reaches it is worked out from
+  // real ball physics rather than the ball being dragged along the squiggle.
+  groundPassMax: 26, // up to this far the ball is driven along the grass
+  loftAngle: 0.52, // radians (~30 deg) for a ball that has to be lifted
+  curlPerMetre: 0.16, // spin gained per metre the drawn line bulges sideways
+  curlMax: 3.2,
+  moveOrderRadius: 1.6, // how close a player must get to a tapped point
 });
 
 export const ROLES = Object.freeze({ GK: 'GK', DF: 'DF', MF: 'MF', FW: 'FW' });

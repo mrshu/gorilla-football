@@ -161,6 +161,55 @@ const FRAME = {
   landscape: { back: 58, lookAhead: 32, height: 34, fov: 46, eyeTrack: 0.6, targetTrack: 0.7 },
 };
 
+// First person: you look out from the player you are playing through, at
+// whatever matters right now, which is the ball when it is loose and the way
+// you are running when you have it.
+//
+// The eye sits a little behind and above the head rather than exactly in it.
+// From a real pair of eyes the ball at your own feet is about 65 degrees below
+// the horizon, so keeping it in frame would mean staring at the grass. Set
+// back by a stride you get your own shoulders at the bottom of the picture and
+// the ball in front of them, which is what every sports game means by first
+// person.
+export function frameFirstPerson(camera, player, lookAt, portrait) {
+  const size = (player.character && player.character.look && player.character.look.size) || 1;
+  const eyeHeight = FIRST_PERSON.eyeHeight * size;
+  const f = unit(player.facing, { x: 1, y: 0 });
+  const eye = {
+    x: player.pos.x - f.x * FIRST_PERSON.behind,
+    y: player.pos.y - f.y * FIRST_PERSON.behind,
+    z: eyeHeight,
+  };
+  // Never look at a point so close that the view swings wildly; push the
+  // target out to a sensible distance along the direction of interest.
+  const to = { x: lookAt.x - eye.x, y: lookAt.y - eye.y };
+  const d = Math.hypot(to.x, to.y);
+  const dir = d > 0.5 ? { x: to.x / d, y: to.y / d } : f;
+  const reach = Math.max(FIRST_PERSON.minLook, Math.min(d, FIRST_PERSON.maxLook));
+  const target = {
+    x: eye.x + dir.x * reach,
+    y: eye.y + dir.y * reach,
+    z: FIRST_PERSON.targetHeight,
+  };
+  camera.setView(eye, target, portrait ? FIRST_PERSON.fovPortrait : FIRST_PERSON.fovLandscape);
+  return camera;
+}
+
+export const FIRST_PERSON = {
+  eyeHeight: 2.35, // metres above the grass, scaled by the character's size
+  behind: 3.2, // eye set back a stride so your own feet and the ball show
+  minLook: 17, // never focus closer than this, or the view swings about
+  maxLook: 34, // or further than this
+  targetHeight: 0.6, // just above the grass, so the near ground is not all you see
+  fovPortrait: 58,
+  fovLandscape: 48,
+};
+
+function unit(v, fallback) {
+  const l = v ? Math.hypot(v.x, v.y) : 0;
+  return l > 1e-6 ? { x: v.x / l, y: v.y / l } : fallback;
+}
+
 function clampNum(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
 }

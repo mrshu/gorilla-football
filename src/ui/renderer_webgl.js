@@ -7,7 +7,7 @@
 // y-up, so the mapping is (x, z, -y), which preserves handedness.
 
 import { PITCH } from '../game/constants.js';
-import { Camera, frameBall } from './camera.js';
+import { Camera, frameBall, frameFirstPerson } from './camera.js';
 import { pitchTexture, crowdTexture, ballTexture } from './textures.js';
 
 const toThree = (THREE, x, y, z = 0) => new THREE.Vector3(x, z, -y);
@@ -201,45 +201,78 @@ export class RendererWebGL {
 
   // -------------------------------------------------------------- players
 
+  // A footballer built from primitives: legs with boots, shorts, a torso with
+  // sleeved arms, a neck and a head with hair. Crude up close, but at the
+  // distance the camera sits it reads as a person rather than a skittle, and
+  // the limbs swing so running looks like running.
   playerView(p) {
     let view = this.playerViews.get(p.id);
     if (view) return view;
     const { THREE, scene } = this;
     const size = p.character.look.size;
+    const S = (n) => n * size;
     const group = new THREE.Group();
+
     const shirt = new THREE.MeshLambertMaterial({ color: p.jersey.primary });
-    const shorts = new THREE.MeshLambertMaterial({ color: shade(p.jersey.primary, -0.45) });
+    const shortsMat = new THREE.MeshLambertMaterial({ color: shade(p.jersey.primary, -0.5) });
+    const sockMat = new THREE.MeshLambertMaterial({ color: p.jersey.secondary });
     const skin = new THREE.MeshLambertMaterial({ color: p.character.look.skin });
-    const accent = new THREE.MeshLambertMaterial({ color: p.character.look.accent });
+    const hairMat = new THREE.MeshLambertMaterial({ color: p.character.look.accent });
+    const boot = new THREE.MeshLambertMaterial({ color: '#23262b' });
 
-    // A plain cylinder rather than a capsule: capsules only exist in newer
-    // three.js releases and this has to work on whatever the CDN serves.
-    const torso = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.3 * size, 0.34 * size, 0.92 * size, 12),
-      shirt,
-    );
-    torso.position.y = 1.05 * size;
-    torso.castShadow = true;
-    group.add(torso);
+    const mesh = (geo, mat, x, y, z) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      m.castShadow = true;
+      return m;
+    };
 
-    for (const dx of [-0.17, 0.17]) {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * size, 0.1 * size, 0.72 * size, 8), shorts);
-      leg.position.set(dx * size, 0.36 * size, 0);
-      leg.castShadow = true;
-      group.add(leg);
+    // Legs: thigh, shin and boot, hung off a hip pivot so they can swing.
+    const legs = [];
+    for (const side of [-1, 1]) {
+      const hip = new THREE.Group();
+      hip.position.set(side * S(0.13), S(0.82), 0);
+      hip.add(mesh(new THREE.CylinderGeometry(S(0.1), S(0.085), S(0.42), 8), shortsMat, 0, S(-0.21), 0));
+      const knee = new THREE.Group();
+      knee.position.set(0, S(-0.42), 0);
+      knee.add(mesh(new THREE.CylinderGeometry(S(0.075), S(0.06), S(0.4), 8), sockMat, 0, S(-0.2), 0));
+      knee.add(mesh(new THREE.BoxGeometry(S(0.13), S(0.08), S(0.26)), boot, 0, S(-0.42), S(0.05)));
+      hip.add(knee);
+      group.add(hip);
+      legs.push({ hip, knee });
     }
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.24 * size, 14, 10), skin);
-    head.position.y = 1.62 * size;
-    head.castShadow = true;
-    group.add(head);
-    // A dab of the character's accent colour so the roster stays readable.
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.245 * size, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2.4), accent);
-    cap.position.y = 1.63 * size;
-    group.add(cap);
 
-    // Ring under the player the human is playing through.
+    // Shorts and torso.
+    group.add(mesh(new THREE.CylinderGeometry(S(0.27), S(0.24), S(0.3), 10), shortsMat, 0, S(0.92), 0));
+    const torso = mesh(new THREE.CylinderGeometry(S(0.26), S(0.28), S(0.56), 12), shirt, 0, S(1.34), 0);
+    group.add(torso);
+    // Shoulders, so the silhouette is not a tube.
+    group.add(mesh(new THREE.SphereGeometry(S(0.15), 10, 8), shirt, S(-0.25), S(1.58), 0));
+    group.add(mesh(new THREE.SphereGeometry(S(0.15), 10, 8), shirt, S(0.25), S(1.58), 0));
+
+    // Arms: a sleeve in the shirt colour, then a bare forearm.
+    const arms = [];
+    for (const side of [-1, 1]) {
+      const shoulder = new THREE.Group();
+      shoulder.position.set(side * S(0.3), S(1.56), 0);
+      shoulder.add(mesh(new THREE.CylinderGeometry(S(0.075), S(0.065), S(0.28), 8), shirt, 0, S(-0.14), 0));
+      shoulder.add(mesh(new THREE.CylinderGeometry(S(0.06), S(0.055), S(0.3), 8), skin, 0, S(-0.43), 0));
+      group.add(shoulder);
+      arms.push(shoulder);
+    }
+
+    // Neck and head.
+    group.add(mesh(new THREE.CylinderGeometry(S(0.07), S(0.08), S(0.1), 8), skin, 0, S(1.66), 0));
+    const head = mesh(new THREE.SphereGeometry(S(0.15), 14, 12), skin, 0, S(1.83), 0);
+    head.scale.set(1, 1.12, 1.02);
+    group.add(head);
+    // Hair as a cap over the top and back of the skull.
+    const hair = mesh(new THREE.SphereGeometry(S(0.155), 14, 10, 0, Math.PI * 2, 0, Math.PI / 1.9), hairMat, 0, S(1.85), S(-0.01));
+    hair.scale.set(1, 1.05, 1.05);
+    group.add(hair);
+
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.55 * size, 0.78 * size, 22),
+      new THREE.RingGeometry(S(0.55), S(0.8), 24),
       new THREE.MeshBasicMaterial({ color: 0xffe600, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
     );
     ring.rotation.x = -Math.PI / 2;
@@ -248,9 +281,26 @@ export class RendererWebGL {
     group.add(ring);
 
     scene.add(group);
-    view = { group, ring, torso };
+    view = { group, ring, torso, legs, arms, phase: Math.random() * Math.PI * 2 };
     this.playerViews.set(p.id, view);
     return view;
+  }
+
+  // Swing the limbs in time with how fast the player is actually moving.
+  animate(view, p, dt) {
+    const speed = Math.hypot(p.vel.x, p.vel.y);
+    view.phase += speed * dt * 1.7;
+    const swing = Math.min(1, speed / 7) * 0.85;
+    const a = Math.sin(view.phase) * swing;
+    view.legs[0].hip.rotation.x = a;
+    view.legs[1].hip.rotation.x = -a;
+    // Knees only bend one way.
+    view.legs[0].knee.rotation.x = Math.max(0, -a * 0.9);
+    view.legs[1].knee.rotation.x = Math.max(0, a * 0.9);
+    view.arms[0].rotation.x = -a * 0.7;
+    view.arms[1].rotation.x = a * 0.7;
+    // Lean into a sprint, and fall flat when sliding.
+    view.group.rotation.x = p.sliding > 0 ? -1.15 : -Math.min(0.22, speed * 0.022);
   }
 
   // ---------------------------------------------------------------- frame
@@ -262,7 +312,11 @@ export class RendererWebGL {
     this.smoothBall.x += (target.x - this.smoothBall.x) * k;
     this.smoothBall.y += (target.y - this.smoothBall.y) * k;
     this.camera.setViewport(layout.w, layout.h);
-    frameBall(this.camera, this.smoothBall, layout.viewAttackDir, layout.portrait);
+    if (layout.firstPerson && layout.eyePlayer) {
+      frameFirstPerson(this.camera, layout.eyePlayer, this.smoothLook(layout, dt), layout.portrait);
+    } else {
+      frameBall(this.camera, this.smoothBall, layout.viewAttackDir, layout.portrait);
+    }
     const { THREE } = this;
     const e = this.camera.eye;
     const t = this.camera.target;
@@ -278,8 +332,20 @@ export class RendererWebGL {
     this.keyLight.shadow.camera.updateProjectionMatrix();
   }
 
+  // Ease the point first person is looking at, so the view does not snap
+  // every time possession changes.
+  smoothLook(layout, dt) {
+    const want = layout.lookAt;
+    if (!this.smoothedLook) this.smoothedLook = { ...want };
+    const k = 1 - Math.exp(-5 * Math.max(0, Math.min(dt, 0.1)));
+    this.smoothedLook.x += (want.x - this.smoothedLook.x) * k;
+    this.smoothedLook.y += (want.y - this.smoothedLook.y) * k;
+    return this.smoothedLook;
+  }
+
   resetCamera(match, layout) {
     this.smoothBall = { ...match.ball.pos };
+    this.smoothedLook = layout && layout.lookAt ? { ...layout.lookAt } : null;
     if (layout) this.updateCamera(match, layout, 1);
   }
 
@@ -298,13 +364,18 @@ export class RendererWebGL {
         view.group.visible = false;
         continue;
       }
+      // In first person you are inside this player's head; drawing them would
+      // fill the screen with the back of their own shirt.
+      if (layout.firstPerson && layout.eyePlayer && layout.eyePlayer.id === p.id) {
+        view.group.visible = false;
+        continue;
+      }
       view.group.visible = true;
       view.group.position.copy(toThree(THREE, p.pos.x, p.pos.y, 0));
       // Face the way they are running.
       const f = p.facing;
       view.group.rotation.y = Math.atan2(f.x, -f.y) - Math.PI / 2;
-      const lean = p.sliding > 0 ? 1.1 : 0;
-      view.torso.rotation.x = lean;
+      this.animate(view, p, opts.dt || 0);
       const controlled = opts.controlledIds && opts.controlledIds.has(p.id);
       view.ring.visible = Boolean(controlled);
       if (controlled) view.ring.material.color.set(p.human === 1 ? 0x00e5ff : 0xffe600);

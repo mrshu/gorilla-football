@@ -2,7 +2,7 @@
 // -timestep game loop and the wiring between input, match and renderer.
 
 import { Match } from '../game/match.js';
-import { normalizeConfig, defaultConfig, humanCount, MODES, CONTROL } from '../game/config.js';
+import { normalizeConfig, defaultConfig, humanCount, MODES, CONTROL, VIEW } from '../game/config.js';
 import { PHYSICS, STATES } from '../game/constants.js';
 import { computeLayout, computeAimLayout } from './layout.js';
 import { Renderer } from './renderer.js';
@@ -119,7 +119,9 @@ export class App {
     const control = this.match ? this.match.config.control : this.setupState.control;
     const humans = this.match ? this.match.humanInputs.length : humanCount(mode);
     if (control === CONTROL.AIM) {
-      this.layout = computeAimLayout(this.cssSize.w, this.cssSize.h, humans, this.viewAttackDir());
+      const first = (this.match ? this.match.config.view : this.setupState.view) === VIEW.FIRST;
+      this.layout = computeAimLayout(this.cssSize.w, this.cssSize.h, humans, this.viewAttackDir(), first);
+      this.updateEye();
       const pitch = this.pitchRenderer;
       pitch.camera.setViewport(this.layout.w, this.layout.h);
       if (this.match) pitch.updateCamera(this.match, this.layout, 1);
@@ -139,6 +141,31 @@ export class App {
 
   get isAim() {
     return Boolean(this.match && this.match.aimControl);
+  }
+
+  // Whose eyes the first-person camera is looking through, and at what.
+  updateEye() {
+    if (!this.layout || !this.match) return;
+    const player = this.match.activePlayerFor(0);
+    this.layout.eyePlayer = player || null;
+    if (!player) {
+      this.layout.lookAt = { ...this.match.ball.pos };
+      return;
+    }
+    const ball = this.match.ball;
+    const haveIt = ball.owner === player.id;
+    if (!haveIt) {
+      // Watch the ball.
+      this.layout.lookAt = { ...ball.pos };
+      return;
+    }
+    // On the ball, look where you are going: up the pitch, nudged towards goal.
+    const team = this.match.teams[player.team];
+    const goal = this.match.goalTargetFor(player);
+    this.layout.lookAt = {
+      x: player.pos.x + team.attackDir * 18 + (goal.x - player.pos.x) * 0.15,
+      y: player.pos.y + (goal.y - player.pos.y) * 0.35,
+    };
   }
 
   // --------------------------------------------------------- screens
@@ -265,7 +292,10 @@ export class App {
     this.aimInput.configure({ camera: this.pitchRenderer.camera });
     for (const r of this.aimInput.drainReleases()) {
       if (r.tap) {
-        m.tap(r.human);
+        // Where on the grass did they tap?
+        const cam = this.pitchRenderer.camera;
+        const spot = r.screen ? cam.screenToGround(r.screen.x, r.screen.y) : null;
+        m.tap(r.human, spot);
         continue;
       }
       // Prefer the drawn line; fall back to a straight kick if the stroke
@@ -375,6 +405,7 @@ export class App {
           });
         }
       }
+      this.updateEye();
       const pitch = this.pitchRenderer;
       const dt = this.screen === SCREEN.MATCH ? dtReal : 0;
       pitch.draw(this.match, this.layout, {
@@ -419,11 +450,11 @@ export class App {
     const m = this.match;
     if (m.state === STATES.GOAL) return null;
     if (m.canKick(0)) {
-      return m.state === STATES.PLAY ? 'Tap to dribble · slide to pass or shoot' : 'Slide to aim the restart';
+      return m.state === STATES.PLAY ? 'Tap to move · draw to pass or shoot' : 'Draw to take the restart';
     }
     const owner = m.ball.owner !== null ? m.getPlayer(m.ball.owner) : null;
-    if (owner && owner.team !== (m.config.humans[0]?.team ?? 0)) return 'Tap to close them down';
-    return null;
+    if (owner && owner.team !== (m.config.humans[0]?.team ?? 0)) return 'Tap where to run · tap them to tackle';
+    return 'Tap where to run';
   }
 }
 

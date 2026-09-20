@@ -5,7 +5,7 @@
 
 import { PITCH, STATES } from '../game/constants.js';
 import { clamp } from '../game/vec.js';
-import { Camera, frameBall } from './camera.js';
+import { Camera, frameBall, frameFirstPerson } from './camera.js';
 
 const SKY_TOP = '#0f2233';
 const SKY_HORIZON = '#3d5f74';
@@ -42,13 +42,29 @@ export class Renderer3D {
     this.smoothBall.x += (target.x - this.smoothBall.x) * k;
     this.smoothBall.y += (target.y - this.smoothBall.y) * k;
     this.camera.setViewport(layout.w, layout.h);
-    frameBall(this.camera, this.smoothBall, layout.viewAttackDir, layout.portrait);
+    if (layout.firstPerson && layout.eyePlayer) {
+      frameFirstPerson(this.camera, layout.eyePlayer, this.smoothLook(layout, dt), layout.portrait);
+    } else {
+      frameBall(this.camera, this.smoothBall, layout.viewAttackDir, layout.portrait);
+    }
   }
 
   // Prime the camera so input taken before the first frame is drawn still
   // maps correctly from the screen onto the grass.
+  // Ease the point first person is looking at, so the view does not snap
+  // every time possession changes.
+  smoothLook(layout, dt) {
+    const want = layout.lookAt;
+    if (!this.smoothedLook) this.smoothedLook = { ...want };
+    const k = 1 - Math.exp(-5 * Math.max(0, Math.min(dt, 0.1)));
+    this.smoothedLook.x += (want.x - this.smoothedLook.x) * k;
+    this.smoothedLook.y += (want.y - this.smoothedLook.y) * k;
+    return this.smoothedLook;
+  }
+
   resetCamera(match, layout) {
     this.smoothBall = { ...match.ball.pos };
+    this.smoothedLook = layout && layout.lookAt ? { ...layout.lookAt } : null;
     if (layout) this.updateCamera(match, layout, 1);
   }
 

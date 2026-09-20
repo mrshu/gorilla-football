@@ -5,7 +5,7 @@
 import { CHARACTERS, STAT_KEYS, getCharacter } from '../data/characters.js';
 import { TEAM_PRESETS } from '../data/teams.js';
 import { JERSEYS, jerseysDistinct } from '../data/jerseys.js';
-import { MODES, MODE_INFO, CONTROL, CONTROL_INFO, DURATION_OPTIONS, humanCount, humanTeamIndex } from '../game/config.js';
+import { MODES, MODE_INFO, CONTROL, CONTROL_INFO, VIEW_INFO, DURATION_OPTIONS, humanCount, humanTeamIndex } from '../game/config.js';
 import { getAbility } from '../game/abilities.js';
 
 const el = (tag, cls, html) => {
@@ -40,13 +40,14 @@ export function showHowTo(root, onBack) {
     <h4>Whole team (default)</h4>
     <p>You run the whole side from a stadium camera. Every footballer moves themselves; your job is the ball.</p>
     <ul>
-      <li><b>Tap</b> with the ball to dribble: you knock it into space ahead and chase it.</li>
-      <li><b>Tap</b> without the ball to close the other side down.</li>
-      <li><b>Draw a line</b> with your finger. It appears on the grass, and that is the route the ball will take.</li>
-      <li><b>Release</b> and the ball sets off along your line. Curve it around a defender and the ball curves too.</li>
+      <li><b>Tap the grass</b> to send your player running there. With the ball at their feet they dribble to the spot.</li>
+      <li><b>Tap an opponent</b> who has the ball to get stuck in.</li>
+      <li><b>Draw a line</b> with your finger and release. The ball is struck towards where the line ended.</li>
     </ul>
-    <p>A longer line means a harder ball. The line is anchored to the ball, so the shape is what counts, not where you drew it. The ball can be cut out along the way, so a route through a crowd is a gamble.</p>
+    <p>The kick itself is real football physics. A short line is driven along the grass hard enough to arrive and stop there; a long one is lifted and dropped on the spot. Draw further than your player can kick and it falls short, as it would.</p>
+    <p>Bend the line and you put curl on the ball, so you can bend one round a defender.</p>
     <p>There is no separate pass and shoot. Draw a line that ends in the net and that was a shot.</p>
+    <p>The camera is <b>first person</b> by default: you look out from the player you are playing through. Switch to the broadcast camera in the setup screen if you would rather see more of the pitch.</p>
     <p>The player on the ball is ringed. If you leave them alone too long they will play it themselves, so the match never stalls.</p>
     <p>Restarts work the same way: aim and release to take the throw, corner, free kick or penalty.</p>
     <h4>One player</h4>
@@ -99,6 +100,7 @@ export function showSetup(root, initial, { onStart, onBack }) {
 
     // Control style
     box.append(section('Control style', controlRow()));
+    if (state.control === CONTROL.AIM) box.append(section('Camera', viewRow()));
 
     // Duration
     box.append(section('Match length', durationRow()));
@@ -229,6 +231,23 @@ export function showSetup(root, initial, { onStart, onBack }) {
     }
     wrap.append(row);
     const info = CONTROL_INFO.find((c) => c.id === state.control) || CONTROL_INFO[0];
+    wrap.append(el('p', 'foot', info.detail));
+    return wrap;
+  }
+
+  function viewRow() {
+    const wrap = el('div');
+    const row = el('div', 'chips');
+    for (const v of VIEW_INFO) {
+      const b = el('button', 'chip' + (state.view === v.id ? ' on' : ''), v.name);
+      b.onclick = () => {
+        state.view = v.id;
+        render();
+      };
+      row.append(b);
+    }
+    wrap.append(row);
+    const info = VIEW_INFO.find((v) => v.id === state.view) || VIEW_INFO[0];
     wrap.append(el('p', 'foot', info.detail));
     return wrap;
   }
