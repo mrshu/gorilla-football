@@ -266,3 +266,16 @@ test('blending between camera poses moves smoothly from one to the other', () =>
   assert.ok(mid.eye.z > Math.min(wide.eye.z, close.eye.z) && mid.eye.z < Math.max(wide.eye.z, close.eye.z));
   assert.ok(mid.fov > Math.min(wide.fov, close.fov) - 0.01 && mid.fov < Math.max(wide.fov, close.fov) + 0.01);
 });
+
+test('the broadcast camera never wanders onto the pitch', () => {
+  for (const portrait of [false, true]) {
+    for (let y = 0; y <= PITCH.width; y += 2) {
+      for (const x of [0, 52, PITCH.length]) {
+        const c = cam(portrait ? 430 : 1280, portrait ? 932 : 720);
+        frameSideline(c, { x, y }, 1, portrait);
+        assert.ok(c.eye.y < -2, `camera stepped onto the pitch at ball y=${y}: eye.y=${c.eye.y.toFixed(1)}`);
+        assert.ok(c.eye.z > 10, 'camera should stay up in the stand');
+      }
+    }
+  }
+});

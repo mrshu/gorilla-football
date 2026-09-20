@@ -184,6 +184,10 @@ export function applyPose(camera, pose) {
 
 // Ease between two camera poses, so switching views is a move rather than a cut.
 export function blendPose(a, b, t) {
+  // Exact at the ends, so a fully blended pose is the pose, not a value a
+  // floating-point whisker away from it.
+  if (t <= 0) return a;
+  if (t >= 1) return b;
   const mix = (p, q) => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t, z: p.z + (q.z - p.z) * t });
   return { eye: mix(a.eye, b.eye), target: mix(a.target, b.target), fov: a.fov + (b.fov - a.fov) * t };
 }
@@ -193,7 +197,7 @@ export function blendPose(a, b, t) {
 // touchlines to be visible, at four screen sizes. `test/camera.test.js`
 // re-checks it.
 const SIDE = {
-  landscape: { distance: 6, height: 18, fov: 62, track: 0.4, trackY: 0.45, aimAcross: 0.4, lead: 0 },
+  landscape: { distance: 10, height: 24, fov: 62, track: 0.6, trackY: 0.15, aimAcross: 0.4, lead: 0 },
   portrait: { distance: 18, height: 44, fov: 70, track: 1, trackY: 0, aimAcross: 0.4, lead: 8 },
 };
 

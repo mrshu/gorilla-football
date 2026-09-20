@@ -24,22 +24,19 @@ ball curves with it. There is no separate pass and shoot button.
 Any static file server works. From the project root:
 
 ```bash
-python3 -m http.server 8000 --bind 0.0.0.0
+npm start          # or: python3 scripts/serve.py
 ```
+
+That serves the folder with caching turned off. It matters: with an ordinary
+static server the browser will happily hand you a stale copy of a module you
+just edited, which looks exactly like your change not working.
 
 Then open <http://localhost:8000/> in a browser.
 
-Node alternative (no install needed beyond npx):
+Other commands:
 
 ```bash
-npx --yes serve -l 8000 .
-```
-
-Or, if you have the repo's `package.json` handy:
-
-```bash
-npm start          # python3 http.server on :8000
-npm run start:node # npx serve on :8000
+npm run start:node # npx serve on :8000, if you would rather not use python
 npm test           # unit tests (node:test, no dependencies)
 npm run sim        # headless AI-vs-AI match, prints score and event counts
 ```

@@ -317,24 +317,10 @@ export class RendererWebGL {
     this.smoothBall.x += (target.x - this.smoothBall.x) * k;
     this.smoothBall.y += (target.y - this.smoothBall.y) * k;
     this.camera.setViewport(layout.w, layout.h);
-    if (layout.firstPerson && layout.eyePlayer) {
-      frameFirstPerson(this.camera, layout.eyePlayer, this.smoothLook(layout, dt), layout.portrait);
-      this.shotBlend = 0;
-      return;
-    }
-    // Drop in behind the player on the ball once they are in range of goal,
-    // easing between the two so it reads as a camera move, not a cut.
-    const shooter = layout.shooter;
-    const want = shooter ? 1 : 0;
-    const rate = 1 - Math.exp(-3.2 * Math.max(0, Math.min(dt, 0.2)));
-    this.shotBlend = (this.shotBlend || 0) + (want - (this.shotBlend || 0)) * rate;
-    const wide = sidelinePose(this.smoothBall, layout.viewAttackDir, layout.portrait);
-    if (this.shotBlend < 0.01 || !layout.shotAnchor) {
-      applyPose(this.camera, wide);
-      return;
-    }
-    const close = shootingPose(layout.shotAnchor.carrier, layout.shotAnchor.goal, layout.portrait);
-    applyPose(this.camera, blendPose(wide, close, this.shotBlend));
+    this.applyFraming(layout, dt);
+    // Whatever framing was chosen, the three.js camera has to be pointed the
+    // same way as the one the input and overlay use, or the line you draw
+    // lands somewhere other than where the pitch appears to be.
     const { THREE } = this;
     const e = this.camera.eye;
     const t = this.camera.target;
@@ -348,6 +334,27 @@ export class RendererWebGL {
     this.keyLight.target.position.copy(toThree(THREE, this.smoothBall.x, this.smoothBall.y, 0));
     this.keyLight.target.updateMatrixWorld();
     this.keyLight.shadow.camera.updateProjectionMatrix();
+  }
+
+  // Point `this.camera` (the shared projection) at whichever view applies.
+  applyFraming(layout, dt) {
+    if (layout.firstPerson && layout.eyePlayer) {
+      frameFirstPerson(this.camera, layout.eyePlayer, this.smoothLook(layout, dt), layout.portrait);
+      this.shotBlend = 0;
+      return;
+    }
+    // Drop in behind the player on the ball once they are in range of goal,
+    // easing between the two so it reads as a camera move, not a cut.
+    const want = layout.shooter ? 1 : 0;
+    const rate = 1 - Math.exp(-3.2 * Math.max(0, Math.min(dt, 0.2)));
+    this.shotBlend = (this.shotBlend || 0) + (want - (this.shotBlend || 0)) * rate;
+    const wide = sidelinePose(this.smoothBall, layout.viewAttackDir, layout.portrait);
+    if (this.shotBlend < 0.01 || !layout.shotAnchor) {
+      applyPose(this.camera, wide);
+      return;
+    }
+    const close = shootingPose(layout.shotAnchor.carrier, layout.shotAnchor.goal, layout.portrait);
+    applyPose(this.camera, blendPose(wide, close, this.shotBlend));
   }
 
   // Ease the point first person is looking at, so the view does not snap
