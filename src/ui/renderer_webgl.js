@@ -252,7 +252,7 @@ export class RendererWebGL {
   // still depth-test, scale with the pitch, and move with the simulation.
   loadPlayerSprites() {
     const shapes = ['gorilla', 'plumber', 'tortoise', 'rocket', 'wizard', 'penguin', 'yeti'];
-    const loads = shapes.map((shape) => new Promise((resolve) => {
+    const load = (path) => new Promise((resolve) => {
       const image = new Image();
       image.onload = () => {
         const texture = new this.THREE.Texture(image);
@@ -261,12 +261,18 @@ export class RendererWebGL {
         texture.magFilter = this.THREE.LinearFilter;
         texture.generateMipmaps = true;
         if (this.THREE.sRGBEncoding !== undefined) texture.encoding = this.THREE.sRGBEncoding;
-        this.spriteTextures.set(shape, texture);
-        resolve();
+        resolve(texture);
       };
-      image.onerror = () => resolve();
-      image.src = `public/assets/player-sprite-${shape}.png`;
-    }));
+      image.onerror = () => resolve(null);
+      image.src = path;
+    });
+    const loads = shapes.map(async (shape) => {
+      const [idle, run] = await Promise.all([
+        load(`public/assets/player-sprite-${shape}.png`),
+        load(`public/assets/player-sprite-${shape}-run.png`),
+      ]);
+      if (idle && run) this.spriteTextures.set(shape, { idle, run });
+    });
     Promise.all(loads).then(() => this.invalidatePlayerViews());
   }
 
@@ -283,12 +289,15 @@ export class RendererWebGL {
 
   spritePlayerView(p, signature, size) {
     const { THREE, scene } = this;
-    const texture = this.spriteTextures.get(p.character.look.shape);
+    const textures = this.spriteTextures.get(p.character.look.shape);
     const material = new THREE.ShaderMaterial({
       uniforms: {
-        map: { value: texture },
+        mapIdle: { value: textures.idle },
+        mapRun: { value: textures.run },
         primary: { value: new THREE.Color(p.jersey.primary) },
         secondary: { value: new THREE.Color(p.jersey.secondary) },
+        accent: { value: new THREE.Color(p.character.look.accent) },
+        runMix: { value: 0 },
       },
       vertexShader: PLAYER_SPRITE_VERTEX,
       fragmentShader: PLAYER_SPRITE_FRAGMENT,
@@ -317,7 +326,7 @@ export class RendererWebGL {
 
     const shadow = new THREE.Mesh(
       new THREE.CircleGeometry(0.32 * size, 18),
-      new THREE.MeshBasicMaterial({ color: 0x02030a, transparent: true, opacity: 0.24, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ color: p.character.look.accent, transparent: true, opacity: 0.16, depthWrite: false }),
     );
     shadow.rotation.x = -Math.PI / 2;
     shadow.scale.set(1.45, 0.58, 1);
@@ -585,18 +594,29 @@ export class RendererWebGL {
     view.phase += dt * Math.max(1.6, Math.min(12, speed * 2.1));
     const moving = speed > 0.7;
     const slide = p.sliding > 0;
-    const stride = moving ? Math.sin(view.phase) * 0.012 : 0;
+    const cycle = Math.sin(view.phase);
+    const stride = moving ? cycle * 0.055 : Math.sin(view.phase * 0.75) * 0.008;
     const height = view.height;
-    view.plane.position.y = slide ? height * 0.28 : height * 0.5;
-    view.plane.scale.set(height, height * (slide ? 0.56 : 1), height);
+    const stretch = moving ? 1 + cycle * 0.045 : 1 + Math.sin(view.phase * 0.75) * 0.012;
+    const planeHeight = height * (slide ? 0.58 : stretch);
+    view.plane.position.x = moving && !slide ? Math.cos(view.phase) * 0.045 : 0;
+    view.plane.position.y = planeHeight * 0.5;
+    view.plane.scale.set(height * (slide ? 1.06 : 1 - cycle * 0.018), planeHeight, height);
     view.plane.rotation.z = slide ? (p.facing.x >= 0 ? -0.58 : 0.58) : stride;
-    view.bob = slide ? 0 : Math.sin(view.phase * 2) * Math.min(0.025, speed * 0.0025);
+    view.material.uniforms.runMix.value = slide ? 1 : moving ? 0.5 + cycle * 0.5 : 0;
+    view.bob = slide ? 0 : Math.sin(view.phase * 2) * Math.min(0.04, speed * 0.004);
   }
 
-  faceSpriteToCamera(view) {
+  faceSpriteToCamera(view, p) {
     const dx = this.three.position.x - view.group.position.x;
     const dz = this.three.position.z - view.group.position.z;
-    view.group.rotation.set(0, Math.atan2(dx, dz), 0);
+    const cameraAngle = Math.atan2(dx, dz);
+    view.group.rotation.set(0, cameraAngle, 0);
+    // The cutout stays readable, but a small facing offset stops the roster
+    // from looking like twenty-two identical cards pasted onto the grass.
+    const facingAngle = Math.atan2(p.facing.x, -p.facing.y);
+    const delta = Math.atan2(Math.sin(facingAngle - cameraAngle), Math.cos(facingAngle - cameraAngle));
+    view.plane.rotation.y = Math.max(-0.24, Math.min(0.24, delta * 0.38));
   }
 
   // ---------------------------------------------------------------- frame
@@ -703,12 +723,18 @@ export class RendererWebGL {
         continue;
       }
       view.group.visible = true;
+      if (view.kind === 'sprite') {
+        // Broadcast cameras put a 105 m pitch on screen at once. A restrained
+        // impostor overscan keeps the generated silhouettes readable without
+        // changing their calibrated height in close or first-person views.
+        view.group.scale.setScalar(layout.firstPerson || layout.shooter ? 1 : 1.12);
+      }
       if (view.shadow) {
         view.shadow.visible = true;
         view.shadow.position.copy(toThree(THREE, p.pos.x, p.pos.y, 0.025));
       }
       view.group.position.copy(toThree(THREE, p.pos.x, p.pos.y, 0));
-      if (view.kind === 'sprite') this.faceSpriteToCamera(view);
+      if (view.kind === 'sprite') this.faceSpriteToCamera(view, p);
       else {
         // Face the way they are running.
         const f = p.facing;
@@ -748,10 +774,17 @@ const PLAYER_SPRITE_VERTEX = `
 `;
 
 const PLAYER_SPRITE_FRAGMENT = `
-  uniform sampler2D map;
+  uniform sampler2D mapIdle;
+  uniform sampler2D mapRun;
   uniform vec3 primary;
   uniform vec3 secondary;
+  uniform vec3 accent;
+  uniform float runMix;
   varying vec2 vUv;
+
+  vec4 sprite(vec2 uv) {
+    return mix(texture2D(mapIdle, uv), texture2D(mapRun, uv), runMix);
+  }
 
   vec3 tint(vec3 source, vec3 target) {
     float luminance = dot(source, vec3(0.2126, 0.7152, 0.0722));
@@ -759,8 +792,15 @@ const PLAYER_SPRITE_FRAGMENT = `
   }
 
   void main() {
-    vec4 texel = texture2D(map, vUv);
-    if (texel.a < 0.06) discard;
+    vec4 texel = sprite(vUv);
+    vec2 px = vec2(0.0018, 0.0012);
+    float neighbour = max(max(sprite(vUv + vec2(px.x, 0.0)).a, sprite(vUv - vec2(px.x, 0.0)).a), max(sprite(vUv + vec2(0.0, px.y)).a, sprite(vUv - vec2(0.0, px.y)).a));
+    float edge = max(0.0, neighbour - texel.a);
+    if (texel.a < 0.06) {
+      if (edge < 0.08) discard;
+      gl_FragColor = vec4(accent, edge * 0.78);
+      return;
+    }
     float blue = smoothstep(0.055, 0.22, texel.b - max(texel.r, texel.g) * 0.72);
     float shirt = blue * smoothstep(0.43, 0.53, vUv.y) * (1.0 - smoothstep(0.74, 0.84, vUv.y));
     float shorts = blue * smoothstep(0.22, 0.31, vUv.y) * (1.0 - smoothstep(0.44, 0.52, vUv.y));
