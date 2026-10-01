@@ -9,6 +9,7 @@
 import { PITCH } from '../game/constants.js';
 import { Camera, frameSideline, frameFirstPerson, sidelinePose, shootingPose, isInShootingRange, applyPose, blendPose } from './camera.js';
 import { pitchTexture, crowdTexture, ballTexture } from './textures.js';
+import { loadFootballers, createFootballer, animateFootballer } from './footballers.js';
 
 const toThree = (THREE, x, y, z = 0) => new THREE.Vector3(x, z, -y);
 
@@ -20,6 +21,7 @@ export class RendererWebGL {
     this.smoothBall = null;
     this.playerViews = new Map();
     this.spriteTextures = new Map();
+    this.footballers = null;
     this.spriteGeometry = new THREE.PlaneGeometry(2 / 3, 1);
     this.pose = null;
 
@@ -44,7 +46,21 @@ export class RendererWebGL {
     this.buildFloodlights();
     this.buildGoals();
     this.buildBall();
-    this.loadPlayerSprites();
+    this.loadPlayers();
+  }
+
+  // Rigged humanoids are the player model. The cutout sprites only stand in
+  // if the models fail to load, and the primitive rig until either arrives.
+  loadPlayers() {
+    loadFootballers(this.THREE)
+      .then((kit) => {
+        this.footballers = kit;
+        this.invalidatePlayerViews();
+      })
+      .catch((err) => {
+        console.warn('footballer models unavailable, using sprites', err);
+        this.loadPlayerSprites();
+      });
   }
 
   // ------------------------------------------------------------- scenery
@@ -349,6 +365,25 @@ export class RendererWebGL {
     return view;
   }
 
+  humanoidPlayerView(p, signature) {
+    const { THREE, scene } = this;
+    const footballer = createFootballer(this.footballers, p);
+    const group = new THREE.Group();
+    group.add(footballer.root);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.5, 0.66, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd35c, transparent: true, opacity: 0.92, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.03;
+    ring.visible = false;
+    group.add(ring);
+    scene.add(group);
+    const view = { kind: 'humanoid', group, ring, footballer, heading: null, bob: 0, signature };
+    this.playerViews.set(p.id, view);
+    return view;
+  }
+
   // -------------------------------------------------------------- players
 
   // A stylized footballer built from low-poly primitives. The base rig is
@@ -368,6 +403,7 @@ export class RendererWebGL {
     // Keep species readable without letting the old look-size range turn
     // ordinary players into giants next to a regulation goal.
     const size = 1 + (look.size - 1) * 0.45;
+    if (this.footballers) return this.humanoidPlayerView(p, signature);
     if (this.spriteTextures.has(shape)) return this.spritePlayerView(p, signature, size);
     const S = (n) => n * size;
     const group = new THREE.Group();
@@ -572,6 +608,7 @@ export class RendererWebGL {
   // Swing the limbs in time with how fast the player is actually moving.
   animate(view, p, dt) {
     if (view.kind === 'sprite') return this.animateSprite(view, p, dt);
+    if (view.kind === 'humanoid') return animateFootballer(view.footballer, p, dt);
     const speed = Math.hypot(p.vel.x, p.vel.y);
     view.phase += speed * dt * 1.7;
     const swing = Math.min(1, speed / 7) * 0.85;
@@ -605,6 +642,17 @@ export class RendererWebGL {
     view.plane.rotation.z = slide ? (p.facing.x >= 0 ? -0.58 : 0.58) : stride;
     view.material.uniforms.runMix.value = slide ? 1 : moving ? 0.5 + cycle * 0.5 : 0;
     view.bob = slide ? 0 : Math.sin(view.phase * 2) * Math.min(0.04, speed * 0.004);
+  }
+
+  // The model faces +z; turn it toward `facing`, quickly but not in one frame,
+  // so a change of direction reads as a turn rather than a snap.
+  turnHumanoid(view, p, dt) {
+    const target = Math.atan2(p.facing.x, -p.facing.y);
+    if (view.heading === null) view.heading = target;
+    let delta = target - view.heading;
+    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+    view.heading += delta * (1 - Math.exp(-16 * dt));
+    view.group.rotation.set(0, view.heading, 0);
   }
 
   faceSpriteToCamera(view, p) {
@@ -735,6 +783,7 @@ export class RendererWebGL {
       }
       view.group.position.copy(toThree(THREE, p.pos.x, p.pos.y, 0));
       if (view.kind === 'sprite') this.faceSpriteToCamera(view, p);
+      else if (view.kind === 'humanoid') this.turnHumanoid(view, p, opts.dt || 0);
       else {
         // Face the way they are running.
         const f = p.facing;
