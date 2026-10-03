@@ -4,10 +4,11 @@
 // One body mesh serves every player. The kit is painted in the shader from
 // where each vertex sits in the bind pose (a T-pose), so the jersey, shorts,
 // socks and boots bend with the skeleton and take any team's colours without
-// a texture per kit. Hair, skin tone and height vary per player so a squad
-// does not read as eleven clones.
+// a texture per kit. Species heads/accessories, skin and proportions follow
+// the selected character, while every limb uses the real gait skeleton.
 
 import { loadScript } from './three-loader.js';
+import { attachCharacterRig } from './character-rig.js';
 
 const MODELS = 'public/models/';
 const ADDONS = ['public/vendor/three/GLTFLoader.js', 'public/vendor/three/SkeletonUtils.js'];
@@ -22,17 +23,6 @@ const GAITS = [
 const IDLE_BELOW = 0.35;
 const SKIN_MATERIAL = 'MI_Superhero_Male';
 
-const HAIR_VARIANTS = [
-  ['hair_buzzed'],
-  ['hair_simpleparted'],
-  ['hair_buzzed', 'hair_beard'],
-  ['hair_simpleparted', 'hair_beard'],
-  [],
-];
-// Multipliers on the base skin texture, light to dark.
-const SKIN_TONES = ['#ffe2cc', '#f2c7a5', '#d9a07a', '#a8704c', '#7a4a30', '#553322'];
-const HAIR_COLOURS = ['#1b1410', '#2e1f16', '#4a3020', '#7a5230', '#b88a4a', '#a0401c'];
-
 export async function loadFootballers(THREE) {
   for (const src of ADDONS) {
     if (!(await loadScript(src))) throw new Error(`could not load ${src}`);
@@ -40,14 +30,11 @@ export async function loadFootballers(THREE) {
   if (!THREE.GLTFLoader || !THREE.SkeletonUtils) throw new Error('three.js addons did not register');
   const loader = new THREE.GLTFLoader();
   const load = (name) => new Promise((resolve, reject) => loader.load(MODELS + name + '.glb', resolve, undefined, reject));
-  const hairNames = [...new Set(HAIR_VARIANTS.flat())];
-  const [body, locomotion, slide, ...hairs] = await Promise.all([
+  const [body, locomotion, slide] = await Promise.all([
     load('footballer'),
     load('anim-locomotion'),
     load('anim-slide'),
-    ...hairNames.map(load),
   ]);
-  const hairByName = Object.fromEntries(hairNames.map((n, i) => [n, hairs[i]]));
 
   const clips = {};
   for (const c of [...locomotion.animations, ...slide.animations]) clips[c.name] = c;
@@ -69,17 +56,27 @@ export async function loadFootballers(THREE) {
   const bounds = kitBounds(body.scene);
   addRestPositions(THREE, bodyMesh);
 
-  // One template per hair variant; each player clones one.
-  const templates = HAIR_VARIANTS.map((variant) => {
-    const root = THREE.SkeletonUtils.clone(body.scene);
-    const skeleton = findSkinned(root)[0].skeleton;
-    for (const piece of variant.map((n) => hairByName[n])) {
-      for (const mesh of findSkinned(piece.scene)) attachToSkeleton(THREE, mesh.clone(), skeleton, root);
-    }
-    return root;
+  const sharedGeometries = new Set(), sharedMaterials = new Set();
+  body.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    sharedGeometries.add(o.geometry);
+    for (const material of [].concat(o.material)) sharedMaterials.add(material);
   });
-
-  return { THREE, templates, clips, bounds };
+  const textures = new Set();
+  for (const material of sharedMaterials) {
+    for (const value of Object.values(material)) if (value?.isTexture) textures.add(value);
+  }
+  let disposed = false;
+  return {
+    THREE, templates: [body.scene], clips, bounds, sharedGeometries, sharedMaterials,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const geometry of sharedGeometries) geometry.dispose();
+      for (const material of sharedMaterials) material.dispose();
+      for (const texture of textures) texture.dispose();
+    },
+  };
 }
 
 // A player's model. `p` supplies the kit, character and a stable id to vary
@@ -88,8 +85,7 @@ export function createFootballer(kit, p) {
   const { THREE } = kit;
   const seed = hashId(p.id);
   const root = THREE.SkeletonUtils.clone(kit.templates[seed % kit.templates.length]);
-  const skin = new THREE.Color(SKIN_TONES[(seed >> 3) % SKIN_TONES.length]);
-  const hair = new THREE.Color(HAIR_COLOURS[(seed >> 6) % HAIR_COLOURS.length]);
+  const skin = new THREE.Color(p.character.look.skin);
   const jersey = p.jersey;
   root.traverse((o) => {
     if (!o.isSkinnedMesh) return;
@@ -98,11 +94,10 @@ export function createFootballer(kit, p) {
     o.frustumCulled = false;
     if (o.geometry.getAttribute('kitRest')) {
       o.material = kitMaterial(THREE, o.material, kit.bounds, jersey, skin);
-    } else if (o.material.name.startsWith('MI_Hair')) {
-      o.material = o.material.clone();
-      o.material.color.copy(hair);
-    }
+      o.customDepthMaterial = characterDepthMaterial(THREE, kit.bounds.headCutoff);
+    } else o.visible = false; // Original human eyes/brows belong to the hidden head.
   });
+  const characterRig = attachCharacterRig(THREE, root, p.character);
   const mixer = new THREE.AnimationMixer(root);
   const action = (name) => {
     const a = mixer.clipAction(kit.clips[name]);
@@ -117,8 +112,9 @@ export function createFootballer(kit, p) {
   idle.time = (seed % 100) / 100 * kit.clips.Idle_Loop.duration;
   const slide = action('Slide_Loop');
   idle.setEffectiveWeight(1);
-  const look = p.character.look;
-  root.scale.setScalar(1 + (look.size - 1) * 0.12);
+  // Evaluate idle once even if the model arrives while aiming or paused;
+  // zero animationDt must preserve this pose rather than the bind T-pose.
+  mixer.update(0);
   return {
     root,
     mixer,
@@ -128,6 +124,10 @@ export function createFootballer(kit, p) {
     cycle: (seed % 97) / 97,
     weights: { idle: 1, slide: 0, gaits: gaits.map(() => 0) },
     heading: null,
+    characterId: p.character.id,
+    characterRig,
+    sharedGeometries: kit.sharedGeometries,
+    sharedMaterials: kit.sharedMaterials,
   };
 }
 
@@ -135,6 +135,7 @@ export function createFootballer(kit, p) {
 // cycle, so the feet stay planted through the transitions, and lay the
 // player out for a slide tackle.
 export function animateFootballer(f, p, dt) {
+  if (!(dt > 0)) return;
   const speed = Math.hypot(p.vel.x, p.vel.y);
   const sliding = p.sliding > 0;
   const target = gaitWeights(f.gaits, speed);
@@ -194,18 +195,6 @@ function findSkinned(root) {
   return out;
 }
 
-// Rebind a hair or eyebrow mesh (rigged to its own copy of the head bone) to
-// the body's skeleton by bone name.
-function attachToSkeleton(THREE, mesh, skeleton, root) {
-  const bones = mesh.skeleton.bones.map((b) => {
-    const match = skeleton.bones.find((x) => x.name === b.name);
-    if (!match) throw new Error(`hair bone ${b.name} not in body skeleton`);
-    return match;
-  });
-  mesh.bind(new THREE.Skeleton(bones, mesh.skeleton.boneInverses), mesh.bindMatrix);
-  root.add(mesh);
-}
-
 // Heights and reach (metres, bind pose) where the kit changes, taken from the
 // skeleton rather than hard-coded so a different body still dresses right.
 function kitBounds(scene) {
@@ -224,6 +213,7 @@ function kitBounds(scene) {
     waist: hip + 0.1,
     collar: neck - 0.015,
     sleeve: shoulder + (elbow - shoulder) * 0.5,
+    headCutoff: (neck + y('Head')) * 0.5,
   };
 }
 
@@ -267,6 +257,8 @@ vec4 kitRegions(vec3 p) {
 function kitMaterial(THREE, base, b, jersey, skinTone) {
   const m = base.clone();
   m.color.copy(skinTone);
+  // Authored human skin colour must not tint white fur or green scales.
+  m.map = null;
   const uniforms = {
     kitBoot: { value: b.boot },
     kitSock: { value: b.sock },
@@ -279,6 +271,7 @@ function kitMaterial(THREE, base, b, jersey, skinTone) {
     kitShorts: { value: new THREE.Color(jersey.secondary) },
     kitSocks: { value: new THREE.Color(jersey.primary) },
     kitBoots: { value: new THREE.Color('#141414') },
+    characterHeadCutoff: { value: b.headCutoff },
   };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
@@ -297,12 +290,14 @@ function kitMaterial(THREE, base, b, jersey, skinTone) {
         '#include <common>',
         `#include <common>
         varying vec3 vKitRest;
+        uniform float characterHeadCutoff;
         uniform vec3 kitShirt, kitTrim, kitShorts, kitSocks, kitBoots;
         ${KIT_GLSL}`,
       )
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
+        if (vKitRest.y > characterHeadCutoff) discard;
         vec4 kr = kitRegions(vKitRest);
         float kitCover = clamp(kr.x + kr.y + kr.z + kr.w, 0.0, 1.0);
         float ax = abs(vKitRest.x);
@@ -320,8 +315,25 @@ function kitMaterial(THREE, base, b, jersey, skinTone) {
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, kitBaseNormal, kitCover * 0.85));')
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, kr.w > 0.5 ? 0.45 : 0.8, kitCover);');
   };
-  m.customProgramCacheKey = () => 'footballer-kit';
+  m.customProgramCacheKey = () => 'footballer-species-kit';
   return m;
+}
+
+// The replacement head supplies its own shadow; the clipped human head must
+// also disappear from Three's directional-light depth pass.
+function characterDepthMaterial(THREE, cutoff) {
+  const material = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, skinning: true });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.characterHeadCutoff = { value: cutoff };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 kitRest;\nvarying float vCharacterHeight;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCharacterHeight = kitRest.y;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vCharacterHeight;\nuniform float characterHeadCutoff;')
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vCharacterHeight > characterHeadCutoff) discard;');
+  };
+  material.customProgramCacheKey = () => 'footballer-species-depth';
+  return material;
 }
 
 function hashId(id) {

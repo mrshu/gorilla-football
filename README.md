@@ -114,10 +114,12 @@ the AI plays by. First person, looking out from your own player, is a setting on
 the pre-match screen. Targets outside the view have an edge tick you can still
 tap to play the suggested pass or shot.
 
-Players use the selected character's idle and running artwork, recoloured for
-their team kit. Species-specific shapes provide a fallback while artwork loads.
-The runtime uses resized cutouts in `public/assets/players`, loaded per species
-on the pitch. Regenerate them from the original artwork with
+Players use animated 3D rigs with their selected character's skin, head and
+accessories, dressed in the chosen team kit. Walking, jogging, sprinting and
+sliding move individual limbs; animation follows speed and freezes with play.
+Articulated species models keep moving while the shared animation assets load.
+Setup portraits use resized cutouts in `public/assets/players`. Regenerate
+them from the original artwork with
 `node scripts/build-player-sprites.mjs` on macOS; checked-in assets need no build.
 
 Human free kicks and penalties use the taker's first-person view during
