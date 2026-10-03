@@ -5,8 +5,9 @@ import { AimInput } from '../src/ui/aiminput.js';
 import { Camera } from '../src/ui/camera.js';
 import { RenderState } from '../src/ui/render-state.js';
 import { Match } from '../src/game/match.js';
-import { normalizeConfig, CONTROL, MODES } from '../src/game/config.js';
-import { STATES, PITCH } from '../src/game/constants.js';
+import { normalizeConfig, CONTROL, MODES, VIEW } from '../src/game/config.js';
+import { STATES, SET_PIECES, PITCH } from '../src/game/constants.js';
+import { Renderer3D } from '../src/ui/renderer3d.js';
 
 function harness({ control = CONTROL.AIM, mode = MODES.SOLO } = {}) {
   const app = Object.create(App.prototype);
@@ -347,4 +348,119 @@ test('paced maths retry yields to pause and decision closure', () => {
     withAnimationFrame(() => app.frame(116));
     assert.equal(app.screen, pause ? 'pause' : 'match');
   }
+});
+
+function stageDirectKick(app, kind = SET_PIECES.FREE_KICK, team = 0) {
+  const dir = app.match.teams[team].attackDir;
+  const pos = { x: dir > 0 ? PITCH.length - 20 : 20, y: PITCH.width / 2 };
+  app.match.beginSetPiece({ kind, team, pos });
+  app.updateEye();
+  return app.match.getPlayer(app.match.setPiece.takerId);
+}
+
+test('human free kicks and penalties use the taker first-person viewpoint while staging', () => {
+  for (const kind of [SET_PIECES.FREE_KICK, SET_PIECES.PENALTY]) {
+    for (const team of [0, 1]) {
+      const app = harness({ mode: MODES.VERSUS });
+      const taker = stageDirectKick(app, kind, team);
+      assert.equal(app.match.ball.owner, null, 'restart is still staging');
+      assert.equal(app.layout.firstPerson, true);
+      assert.equal(app.layout.eyePlayer, taker, 'P2 restarts also use their taker');
+      assert.equal(app.match.config.view, VIEW.BROADCAST, 'camera preference remains unchanged');
+      assert.ok((app.layout.lookAt.x - taker.pos.x) * app.match.teams[team].attackDir > 0);
+    }
+  }
+});
+
+test('direct kick first-person viewpoint follows released ball then restores camera on possession', () => {
+  for (const kind of [SET_PIECES.FREE_KICK, SET_PIECES.PENALTY]) {
+    const app = harness();
+    const taker = stageDirectKick(app, kind);
+    app.match.snapToSetPiece();
+    app.match.setPiece.lerp = 1;
+    taker.kickCooldown = taker.stun = taker.frozen = 0;
+    assert.equal(app.match.aimKick(0, { x: 1, y: 0 }, 0.8), true);
+    app.match.applyAimInputs();
+    assert.equal(app.match.setPiece, null);
+    assert.equal(app.match.ball.owner, null);
+    assert.equal(app.match.state, STATES.PLAY);
+    app.updateEye();
+    assert.equal(app.layout.firstPerson, true);
+    assert.equal(app.layout.eyePlayer.id, taker.id);
+    assert.deepEqual(app.layout.lookAt, app.match.ball.pos);
+    app.match.ball.owner = app.match.teams[1].players[6].id;
+    app.updateEye();
+    assert.equal(app.layout.firstPerson, false);
+    assert.equal(app.directKickCamera, null);
+  }
+});
+
+test('direct kick drawing retains the first-person camera and exact gesture projection', () => {
+  const app = harness();
+  app.renderer3d = Object.assign(Object.create(Renderer3D.prototype), {
+    camera: app.renderer3d.camera, smoothBall: null, smoothedLook: null, pose: null, shotBlend: 0,
+  });
+  stageDirectKick(app, SET_PIECES.PENALTY);
+  app.match.snapToSetPiece();
+  app.match.setPiece.lerp = 1;
+  app.updateEye();
+  app.renderer3d.updateCamera(app.match, app.layout, 1);
+  app.aimInput.onDown(pointer(1, 200, 700));
+  app.aimInput.onMove(pointer(1, 230, 500));
+  const pose = { eye: { ...app.renderer3d.camera.eye }, target: { ...app.renderer3d.camera.target } };
+  const path = app.aimInput.aimState(0).path;
+  app.layout.aiming = app.aimInput.hasGesture;
+  for (let frame = 0; frame < 30; frame++) {
+    app.updateEye();
+    app.renderer3d.updateCamera(app.match, app.layout, 1 / 60);
+  }
+  assert.equal(app.layout.firstPerson, true);
+  assert.deepEqual(app.renderer3d.camera.eye, pose.eye);
+  assert.deepEqual(app.renderer3d.camera.target, pose.target);
+  assert.deepEqual(app.aimInput.aimState(0).path, path);
+  app.aimInput.onCancel(pointer(1, 230, 500));
+});
+
+test('AI and other restarts keep the chosen camera; stoppages end the temporary viewpoint', () => {
+  const app = harness();
+  for (const kind of [SET_PIECES.KICKOFF, SET_PIECES.CORNER, SET_PIECES.THROW_IN]) {
+    stageDirectKick(app, kind);
+    assert.equal(app.layout.firstPerson, false);
+  }
+  stageDirectKick(app, SET_PIECES.FREE_KICK, 1);
+  assert.equal(app.layout.firstPerson, false, 'solo opponent free kick stays broadcast');
+  stageDirectKick(app, SET_PIECES.PENALTY);
+  assert.equal(app.layout.firstPerson, true);
+  app.match.setPiece = null;
+  app.match.state = STATES.GOAL;
+  app.updateEye();
+  assert.equal(app.layout.firstPerson, false);
+  assert.equal(app.directKickCamera, null);
+});
+
+test('explicit first-person preference survives the end of a direct kick viewpoint', () => {
+  const app = harness();
+  app.match.config.view = VIEW.FIRST;
+  stageDirectKick(app);
+  app.match.setPiece = null;
+  app.match.state = STATES.PLAY;
+  app.match.ball.owner = app.match.teams[1].players[6].id;
+  app.updateEye();
+  assert.equal(app.directKickCamera, null);
+  assert.equal(app.layout.firstPerson, true);
+});
+
+test('entering a direct kick eases from the existing camera rather than cutting', () => {
+  const app = harness();
+  app.renderer3d = Object.assign(Object.create(Renderer3D.prototype), {
+    camera: app.renderer3d.camera, smoothBall: null, smoothedLook: null, pose: null, shotBlend: 0,
+  });
+  app.renderer3d.updateCamera(app.match, app.layout, 1);
+  const before = { ...app.renderer3d.camera.eye };
+  stageDirectKick(app);
+  app.renderer3d.updateCamera(app.match, app.layout, 1 / 60);
+  const after = app.renderer3d.camera.eye;
+  const moved = Math.hypot(after.x - before.x, after.y - before.y, after.z - before.z);
+  assert.ok(moved > 0 && moved < 3, `first frame must ease, moved ${moved}m`);
+  assert.ok(after.z > 10, 'first frame must not cut directly to head height');
 });

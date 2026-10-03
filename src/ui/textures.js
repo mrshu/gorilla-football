@@ -1,6 +1,6 @@
 // Generated textures. Everything the WebGL renderer puts on a surface is
-// painted here into an offscreen canvas first, so the repository still holds
-// no image assets.
+// painted here into an offscreen canvas first, keeping stadium surfaces
+// lightweight and independent of the character artwork.
 
 import { PITCH } from '../game/constants.js';
 
@@ -27,7 +27,7 @@ export function pitchTexture(THREE, { margin = 6, pxPerMetre = 18 } = {}) {
   ctx.fillRect(0, 0, c.width, c.height);
   const stripes = 16;
   for (let i = 0; i < stripes; i++) {
-    ctx.fillStyle = i % 2 ? '#28795a' : '#1e634a';
+    ctx.fillStyle = i % 2 ? '#388466' : '#32785d';
     ctx.fillRect(X((i / stripes) * PITCH.length), 0, (PITCH.length / stripes) * pxPerMetre, c.height);
   }
   // A little wear towards the middle so the grass is not perfectly flat.
@@ -100,21 +100,29 @@ export function pitchTexture(THREE, { margin = 6, pxPerMetre = 18 } = {}) {
 export function crowdTexture(THREE) {
   const c = makeCanvas(1024, 512);
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#171d35';
+  ctx.fillStyle = '#182735';
   ctx.fillRect(0, 0, c.width, c.height);
-  const colours = ['#f5f4e9', '#8b85d9', '#ff6b5f', '#ffd35c', '#63e5ff', '#b6f36b', '#7463ff', '#43507d'];
-  const rows = 30;
-  const cols = 90;
+  // Muted shirts and clear aisles read as a terrace rather than a wall of
+  // bright pixels. Keep the crowd quieter than the ball and player markers.
+  const colours = ['#5c6d7c', '#3d5c69', '#59617c', '#80744f', '#677c79', '#875c58'];
+  const rows = 20;
+  const cols = 64;
+  const cellW = c.width / cols;
+  const cellH = c.height / rows;
   for (let r = 0; r < rows; r++) {
-    ctx.fillStyle = r % 2 ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.12)';
-    ctx.fillRect(0, (r / rows) * c.height, c.width, c.height / rows);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.fillRect(0, r * cellH + cellH - 3, c.width, 3);
     for (let i = 0; i < cols; i++) {
       const h = hash2(i, r);
-      if (h > 0.86) continue;
+      if (h > 0.88 || i % 16 < 2) continue;
       ctx.fillStyle = colours[(h * colours.length) | 0];
-      const x = (i / cols) * c.width + (hash2(r, i) - 0.5) * 3;
-      const y = (r / rows) * c.height + 2;
-      ctx.fillRect(x, y, c.width / cols - 2.5, c.height / rows - 3.5);
+      const x = i * cellW + cellW / 2 + (hash2(r, i) - 0.5) * 2;
+      const y = r * cellH + 7;
+      ctx.fillRect(x - 4, y + 5, 8, 11);
+      ctx.fillStyle = '#a39483';
+      ctx.beginPath();
+      ctx.arc(x, y + 2, 2.8, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
   const tex = new THREE.CanvasTexture(c);

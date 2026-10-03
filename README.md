@@ -112,6 +112,10 @@ where the game reckons the ball should go next; it reads the same pass ranking
 the AI plays by. First person, looking out from your own player, is a setting on
 the pre-match screen.
 
+Human free kicks and penalties use the taker's first-person view during
+staging, aiming and ball flight. Drawing holds that view steady; the configured
+camera returns at the next possession or stoppage.
+
 The player on the ball is ringed. Restarts work the same way: aim and release to
 take the throw, corner, free kick or penalty. Leave a restart untaken for six
 seconds and the taker plays it automatically, so a match never stalls.

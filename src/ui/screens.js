@@ -21,18 +21,12 @@ export function showMenu(root, { onPlay, onHowTo }) {
   root.className = 'overlay menu';
   const box = el('div', 'panel menu-panel');
   const eyebrow = el('div', 'menu-eyebrow');
-  eyebrow.append(el('span', null, 'GF / 01'));
-  eyebrow.append(el('span', null, 'NIGHT LEAGUE'));
+  eyebrow.append(el('span', null, 'Night League'));
   box.append(eyebrow);
   box.append(el('h1', 'title', 'GORILLA<span>FOOTBALL</span>'));
-  box.append(el('p', 'subtitle', 'Street rules. Wild physics. One perfect touch.'));
+  box.append(el('p', 'subtitle', 'Pick your squad. Draw your passes. Play under the lights.'));
 
-  const signal = el('div', 'menu-signal');
-  signal.append(el('span', 'signal-dot'));
-  signal.append(el('span', null, 'LIVE FROM THE CONCRETE JUNGLE'));
-  box.append(signal);
-
-  const play = el('button', 'btn primary big', 'Kick off');
+  const play = el('button', 'btn primary big', 'Play football');
   play.onclick = onPlay;
   const how = el('button', 'btn ghost', 'Read the playbook');
   how.onclick = onHowTo;
@@ -42,10 +36,9 @@ export function showMenu(root, { onPlay, onHowTo }) {
 
   const meta = el('div', 'menu-meta');
   meta.append(el('div', null, '<b>11</b><span>players a side</span>'));
-  meta.append(el('div', null, '<b>01—02</b><span>players on one device</span>'));
-  meta.append(el('div', null, '<b>∞</b><span>ways to bend the ball</span>'));
+  meta.append(el('div', null, '<b>1 or 2</b><span>players on one device</span>'));
+  meta.append(el('div', null, '<b>Optional</b><span>maths practice</span>'));
   box.append(meta);
-  box.append(el('p', 'foot menu-foot', 'A Gorilla Football original · best played loud'));
   root.append(box);
   root.hidden = false;
 }
@@ -70,6 +63,7 @@ export function showHowTo(root, onBack) {
     <p>Possession slows play immediately, giving you time to choose. Drawing a kick freezes play and the camera; releasing it resumes play.</p>
     <p>Once you carry the ball inside thirty metres of goal the camera drops in behind you, low and facing the goal, to line up the shot. A yellow tick marks where the game reckons the ball should go next.</p>
     <p>The camera is a <b>side view</b> by default, the way football is televised. First person, looking out from your own player, is a setting on the pre-match screen.</p>
+    <p>Your free kicks and penalties use the taker's <b>first-person view</b> while you line up the kick and follow the ball. The view stays steady while you draw, then returns to your chosen camera at the next possession or stoppage.</p>
     <p>The player on the ball is ringed. Untaken restarts are played automatically after a few seconds.</p>
     <p>Restarts work the same way: aim and release to take the throw, corner, free kick or penalty.</p>
     <h4>One player</h4>
@@ -107,55 +101,83 @@ export function showHowTo(root, onBack) {
 
 export function showSetup(root, initial, { onStart, onBack }) {
   const state = JSON.parse(JSON.stringify(initial));
-  root.className = 'overlay';
+  root.className = 'overlay setup';
 
   function render() {
+    const scrollTop = root.querySelector('.setup-content')?.scrollTop || 0;
+    const focusKey = root.contains(document.activeElement) ? document.activeElement.dataset.setupFocus : null;
     root.innerHTML = '';
-    const box = el('div', 'panel scroll wide setup-panel');
-    const top = el('div', 'setup-topline');
-    top.append(el('span', null, 'GF / 01'));
-    top.append(el('span', null, 'PRE-FLIGHT CHECK'));
-    box.append(top);
-    box.append(el('h2', 'setup-title', 'Build your squad'));
-    box.append(el('p', 'subtitle', 'Tune the matchup, then send it into the lights.'));
-    const cast = el('div', 'character-hero');
-    cast.innerHTML = '<img src="public/assets/gorilla-football-character-sheet.png" alt="The Gorilla Football character lineup"><span>THE NIGHT LEAGUE CAST</span>';
-    box.append(cast);
+    const box = el('div', 'panel wide setup-panel');
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-labelledby', 'setup-title');
+    const header = el('header', 'setup-header');
+    const title = el('h2', 'setup-title', 'Match setup');
+    title.id = 'setup-title';
+    header.append(title, el('p', 'subtitle', 'Choose your players and how you want to play.'));
+    box.append(header);
 
-    // Mode
-    box.append(section('Game mode', modeRow()));
+    const content = el('div', 'setup-content');
+    const settings = el('div', `setup-settings${state.control === CONTROL.AIM ? ' with-camera' : ''}`);
+    settings.append(section('Game mode', modeRow(), 'setup-field setup-mode'));
+    settings.append(section('Control style', controlRow()));
+    if (state.control === CONTROL.AIM) settings.append(section('Camera', viewRow()));
+    settings.append(section('Match length', durationRow()));
+    content.append(settings);
+
     const n = humanCount(state.mode);
+    const squads = el('div', 'setup-squads');
+    const players = el('section', 'setup-players');
+    players.append(el('h2', 'setup-group-title', n === 1 ? 'Your player' : 'Your players'));
+    const playerGrid = el('div', `setup-player-grid${n === 1 ? ' solo' : ''}`);
 
     // Characters per human
     for (let i = 0; i < n; i++) {
-      box.append(section(`Player ${i + 1} character${n > 1 ? ` (${state.mode === MODES.COOP ? 'team 1' : `team ${humanTeamIndex(state.mode, i) + 1}`})` : ''}`, charRow(i)));
-      box.append(section(`Player ${i + 1} maths practice`, mathsRow(i)));
+      const player = el('section', `setup-player player-${i + 1}`);
+      const playerHeader = el('div', 'setup-player-header');
+      playerHeader.append(el('h3', null, `Player ${i + 1}`));
+      playerHeader.append(el('span', 'setup-player-team', `Team ${humanTeamIndex(state.mode, i) + 1}`));
+      player.append(playerHeader);
+      player.append(section('Character', charRow(i), 'setup-field player-character', 'h4'));
+      player.append(section('Maths practice', mathsRow(i), 'setup-field player-maths', 'h4'));
+      playerGrid.append(player);
     }
+    players.append(playerGrid);
+    squads.append(players);
 
     // Teams + jerseys
-    for (let t = 0; t < 2; t++) box.append(section(`Team ${t + 1}${humanTeams().includes(t) ? ' (you)' : ' (AI)'}`, teamRow(t)));
+    const teams = el('section', 'setup-teams');
+    teams.append(el('h2', 'setup-group-title', 'Teams and kits'));
+    for (let t = 0; t < 2; t++) teams.append(section(`Team ${t + 1} · ${humanTeams().includes(t) ? 'you' : 'AI'}`, teamRow(t), 'setup-team'));
+    squads.append(teams);
+    content.append(squads);
+    box.append(content);
 
-    // Control style
-    box.append(section('Control style', controlRow()));
-    if (state.control === CONTROL.AIM) box.append(section('Camera', viewRow()));
-
-    // Duration
-    box.append(section('Match length', durationRow()));
-
+    const footer = el('footer', 'setup-footer');
+    const summary = el('div', 'setup-summary');
+    const controls = CONTROL_INFO.find((c) => c.id === state.control) || CONTROL_INFO[0];
+    summary.append(el('p', null, `${n === 1 ? '1 player' : '2 players'} · ${controls.name} · ${state.durationMinutes} min`));
     const warn = el('div', 'warn');
+    warn.id = 'setup-warning';
+    warn.setAttribute('role', 'status');
     if (!jerseysDistinct(jersey(0), jersey(1))) warn.textContent = 'Pick two clearly different jerseys.';
-    box.append(warn);
+    summary.append(warn);
+    footer.append(summary);
 
-    const row = el('div', 'row end');
+    const row = el('div', 'setup-actions');
     const back = el('button', 'btn ghost', 'Back');
     back.onclick = onBack;
-    const start = el('button', 'btn primary big', 'KICK OFF');
+    const start = el('button', 'btn primary big', 'Kick off');
     start.disabled = !jerseysDistinct(jersey(0), jersey(1));
+    if (start.disabled) start.setAttribute('aria-describedby', warn.id);
     start.onclick = () => onStart(JSON.parse(JSON.stringify(state)));
     row.append(back, start);
-    box.append(row);
+    footer.append(row);
+    box.append(footer);
     root.append(box);
     root.hidden = false;
+    content.scrollTop = scrollTop;
+    if (focusKey) root.querySelector(`[data-setup-focus="${focusKey}"]`)?.focus({ preventScroll: true });
   }
 
   const jersey = (t) => JERSEYS.find((j) => j.id === state.teams[t].jerseyId) || JERSEYS[0];
@@ -165,9 +187,9 @@ export function showSetup(root, initial, { onStart, onBack }) {
     return [...new Set(out)];
   };
 
-  function section(title, content) {
-    const s = el('section');
-    s.append(el('h3', null, title));
+  function section(title, content, className = 'setup-field', heading = 'h3') {
+    const s = el('section', className);
+    s.append(el(heading, null, title));
     s.append(content);
     return s;
   }
@@ -176,6 +198,8 @@ export function showSetup(root, initial, { onStart, onBack }) {
     const row = el('div', 'chips');
     for (const m of MODE_INFO) {
       const b = el('button', 'chip' + (state.mode === m.id ? ' on' : ''), m.name);
+      b.setAttribute('aria-pressed', String(state.mode === m.id));
+      b.dataset.setupFocus = `mode-${m.id}`;
       b.onclick = () => {
         state.mode = m.id;
         render();
@@ -191,7 +215,16 @@ export function showSetup(root, initial, { onStart, onBack }) {
     for (const c of CHARACTERS) {
       const sel = state.humans[i].characterId === c.id;
       const card = el('button', 'card' + (sel ? ' on' : ''));
-      card.append(el('div', 'avatar', avatarSvg(c)));
+      card.setAttribute('aria-label', c.name);
+      card.setAttribute('aria-pressed', String(sel));
+      card.dataset.setupFocus = `character-${i}-${c.id}`;
+      const avatar = el('div', 'avatar');
+      const portrait = document.createElement('img');
+      portrait.src = `public/assets/player-sprite-${c.id}.png`;
+      portrait.alt = '';
+      portrait.decoding = 'async';
+      avatar.append(portrait);
+      card.append(avatar);
       card.append(el('div', 'cname', c.name));
       card.onclick = () => {
         state.humans[i].characterId = c.id;
@@ -258,6 +291,8 @@ export function showSetup(root, initial, { onStart, onBack }) {
     const teams = el('div', 'chips');
     for (const p of TEAM_PRESETS) {
       const b = el('button', 'chip' + (state.teams[t].presetId === p.id ? ' on' : ''), p.name);
+      b.setAttribute('aria-pressed', String(state.teams[t].presetId === p.id));
+      b.dataset.setupFocus = `team-${t}-${p.id}`;
       b.onclick = () => {
         state.teams[t].presetId = p.id;
         render();
@@ -266,6 +301,8 @@ export function showSetup(root, initial, { onStart, onBack }) {
     }
     wrap.append(teams);
     const kits = el('div', 'kits');
+    kits.setAttribute('role', 'group');
+    kits.setAttribute('aria-label', `Team ${t + 1} jersey colour`);
     for (const j of JERSEYS) {
       const other = jersey(1 - t);
       const b = el('button', 'kit' + (state.teams[t].jerseyId === j.id ? ' on' : '') + (j.id === other.id ? ' dim' : ''));
@@ -273,6 +310,9 @@ export function showSetup(root, initial, { onStart, onBack }) {
       b.style.color = j.secondary;
       b.textContent = 'A';
       b.title = j.name;
+      b.setAttribute('aria-label', `${j.name} jersey`);
+      b.setAttribute('aria-pressed', String(state.teams[t].jerseyId === j.id));
+      b.dataset.setupFocus = `jersey-${t}-${j.id}`;
       b.onclick = () => {
         state.teams[t].jerseyId = j.id;
         render();
@@ -288,6 +328,8 @@ export function showSetup(root, initial, { onStart, onBack }) {
     const row = el('div', 'chips');
     for (const c of CONTROL_INFO) {
       const b = el('button', 'chip' + (state.control === c.id ? ' on' : ''), c.name);
+      b.setAttribute('aria-pressed', String(state.control === c.id));
+      b.dataset.setupFocus = `control-${c.id}`;
       b.onclick = () => {
         state.control = c.id;
         render();
@@ -305,6 +347,8 @@ export function showSetup(root, initial, { onStart, onBack }) {
     const row = el('div', 'chips');
     for (const v of VIEW_INFO) {
       const b = el('button', 'chip' + (state.view === v.id ? ' on' : ''), v.name);
+      b.setAttribute('aria-pressed', String(state.view === v.id));
+      b.dataset.setupFocus = `view-${v.id}`;
       b.onclick = () => {
         state.view = v.id;
         render();
@@ -321,6 +365,8 @@ export function showSetup(root, initial, { onStart, onBack }) {
     const row = el('div', 'chips');
     for (const d of DURATION_OPTIONS) {
       const b = el('button', 'chip' + (state.durationMinutes === d ? ' on' : ''), `${d} min`);
+      b.setAttribute('aria-pressed', String(state.durationMinutes === d));
+      b.dataset.setupFocus = `duration-${d}`;
       b.onclick = () => {
         state.durationMinutes = d;
         render();
@@ -479,13 +525,4 @@ function statsTable(match) {
 
 function count(cards, team) {
   return cards.filter((c) => c.team === team).length;
-}
-
-function avatarSvg(c) {
-  const { skin, accent } = c.look;
-  return `<svg viewBox="0 0 40 40" width="40" height="40" aria-hidden="true">
-    <circle cx="20" cy="22" r="13" fill="${accent}" stroke="rgba(0,0,0,.45)"/>
-    <circle cx="20" cy="15" r="9" fill="${skin}" stroke="rgba(0,0,0,.35)"/>
-    <circle cx="16.5" cy="14" r="1.6" fill="#111"/><circle cx="23.5" cy="14" r="1.6" fill="#111"/>
-  </svg>`;
 }

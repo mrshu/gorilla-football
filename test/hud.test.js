@@ -51,12 +51,16 @@ test('whole-team special shows uses and cooldown after activation', () => {
 
 function textCanvas() {
   const texts = [];
+  const labels = [];
   const noop = () => {};
   return {
-    texts,
+    texts, labels,
     save: noop, restore: noop, fillRect: noop, beginPath: noop, arc: noop,
     fill: noop, stroke: noop, moveTo: noop, arcTo: noop, closePath: noop,
-    fillText: (text) => texts.push(text),
+    fillText(text, x, y) {
+      texts.push(text);
+      labels.push({ text, x, y, align: this.textAlign, font: this.font });
+    },
     measureText: (text) => ({ width: text.length * 6 }),
   };
 }
@@ -66,13 +70,78 @@ test('HUD identifies carrier and then defender, and displays possession notifica
   const layout = computeAimLayout(390, 844, 1, 1);
   const canvas = textCanvas();
   drawHud(canvas, match, layout, { possessionNotices: [{ human: 0, text: 'POSSESSION WON' }] });
-  assert.ok(canvas.texts.includes('PLAY SLOWED · DRAW TO KICK'));
-  assert.ok(canvas.texts.includes('POSSESSION WON'));
-  assert.ok(canvas.texts.includes('P1 SPECIAL [L]'));
+  assert.ok(canvas.texts.includes('Slow play · draw or tap ✓'));
+  assert.ok(canvas.texts.includes('Possession won'));
+  assert.ok(canvas.texts.includes('P1 special'));
+  assert.ok(canvas.texts.includes('L'));
   assert.ok(canvas.texts.includes('Jungle Thunder'));
   canvas.texts.length = 0;
   match.ball.owner = match.teams[1].players[6].id;
   drawHud(canvas, match, layout);
-  assert.ok(canvas.texts.includes('DEFENDING · TAP TO PRESS'));
+  assert.ok(canvas.texts.includes('Defending · tap to press'));
   assert.ok(canvas.texts.some((text) => text.startsWith('P1 · #')));
+});
+
+test('phone and versus HUDs keep long labels on screen without changing touch targets', () => {
+  for (const mode of ['solo', 'versus']) {
+    const match = new Match(normalizeConfig({ mode }));
+    match.state = STATES.PLAY;
+    match.setPiece = null;
+    match.ball.owner = match.humanPlayer(0).id;
+    match.teams[0].name = 'The extraordinarily long jungle football club';
+    match.teams[1].name = 'The extraordinarily long pipeworks football club';
+    const layout = computeAimLayout(390, 844, match.humanInputs.length, 1);
+    const before = structuredClone(layout.specialButtons);
+    const pause = { ...layout.pauseBtn };
+    const canvas = textCanvas();
+    drawHud(canvas, match, layout, { hint: 'Draw a kick · tap the tick to pass' });
+    assert.deepEqual(layout.specialButtons, before);
+    assert.deepEqual(layout.pauseBtn, pause);
+    assert.ok(canvas.texts.some((text) => text.endsWith('…')), 'long team names use readable ellipsis');
+    for (const label of canvas.labels) {
+      const width = canvas.measureText(label.text).width;
+      const left = label.x - (label.align === 'right' ? width : label.align === 'center' ? width / 2 : 0);
+      assert.ok(left >= 0 && left + width <= layout.w, `label ${label.text} must fit on screen`);
+      assert.ok(label.font.includes('Avenir Next'));
+    }
+    if (mode === 'versus') {
+      assert.ok(canvas.texts.some((text) => text.startsWith('P2 · #')));
+      assert.ok(canvas.texts.includes('P2 special'));
+      assert.ok(canvas.texts.includes('3'));
+    }
+  }
+});
+
+test('HUD panels trace four nondegenerate rectangular corners, including the full special hit area', () => {
+  const match = playingMatch();
+  const layout = computeAimLayout(390, 844, 1, 1);
+  const canvas = textCanvas();
+  const paths = [];
+  let corners = [];
+  canvas.beginPath = () => { corners = []; };
+  canvas.arcTo = (x, y, nextX, nextY) => {
+    assert.ok(x !== nextX || y !== nextY, 'a rounded corner needs a distinct following edge');
+    corners.push({ x, y });
+  };
+  canvas.fill = () => { if (corners.length) paths.push(corners.slice()); };
+  drawHud(canvas, match, layout, { hint: 'Draw a kick', possessionNotices: [{ human: 0, text: 'Possession won' }] });
+  assert.ok(paths.length >= 4, 'exercise badges, notices, special controls and hint panels');
+  for (const path of paths) {
+    assert.equal(path.length, 4, 'each panel has four rounded corners');
+    const left = Math.min(...path.map((p) => p.x));
+    const right = Math.max(...path.map((p) => p.x));
+    const top = Math.min(...path.map((p) => p.y));
+    const bottom = Math.max(...path.map((p) => p.y));
+    let twiceArea = 0;
+    for (let i = 0; i < path.length; i++) {
+      const next = path[(i + 1) % path.length];
+      twiceArea += path[i].x * next.y - next.x * path[i].y;
+    }
+    assert.equal(Math.abs(twiceArea) / 2, (right - left) * (bottom - top), 'the corners cover a rectangle, never a diagonal triangle');
+  }
+  const button = layout.specialButtons[0];
+  assert.ok(paths.some((path) => Math.min(...path.map((p) => p.x)) === button.x
+    && Math.max(...path.map((p) => p.x)) === button.x + button.w
+    && Math.min(...path.map((p) => p.y)) === button.y
+    && Math.max(...path.map((p) => p.y)) === button.y + button.h), 'the visible special panel covers the exact hit rectangle');
 });

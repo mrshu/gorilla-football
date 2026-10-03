@@ -324,10 +324,16 @@ export function showMathsQuiz(root, question, {
   panel.setAttribute('aria-labelledby', `${id}-title`);
   panel.setAttribute('aria-describedby', `${id}-lead`);
   const header = element('div', 'mq-header');
-  const heading = element('h2', 'mq-heading', `P${humanIndex + 1} · Maths break`);
+  const player = element('span', 'mq-player', `P${humanIndex + 1}`);
+  player.id = `${id}-player`;
+  player.setAttribute('aria-label', `Player ${humanIndex + 1}`);
+  const heading = element('h2', 'mq-heading', 'Maths break');
   heading.id = `${id}-title`;
-  header.append(heading, element('span', 'mq-prize', 'Focused kick'));
-  const lead = element('p', 'mq-lead', 'Solve this for a more accurate next pass or shot.');
+  panel.setAttribute('aria-labelledby', `${id}-player ${id}-title`);
+  const identity = element('div', 'mq-identity');
+  identity.append(player, heading);
+  header.append(identity, element('span', 'mq-prize', 'Focused kick'));
+  const lead = element('p', 'mq-lead', 'Get it right for a more accurate next kick.');
   lead.id = `${id}-lead`;
   const prompt = element('div', 'mq-question');
   prompt.setAttribute('role', 'math');
@@ -335,18 +341,20 @@ export function showMathsQuiz(root, question, {
   for (const token of question.render) prompt.append(renderMathsToken(token));
 
   const choices = element('div', 'mq-choices');
+  choices.style.setProperty('--mq-columns', Math.min(3, question.choices.length));
   choices.setAttribute('role', 'group');
   choices.setAttribute('aria-label', 'Choose an answer');
   const feedback = element('p', 'mq-feedback');
   feedback.setAttribute('role', 'status');
   feedback.setAttribute('aria-live', 'polite');
   const footer = element('div', 'mq-footer');
+  const pauseNote = element('span', 'mq-pause-note', 'Match paused');
   const skip = element('button', 'mq-skip', 'Skip · keep playing');
   skip.type = 'button';
   const proceed = element('button', 'mq-continue', 'Continue');
   proceed.type = 'button';
   proceed.hidden = true;
-  footer.append(skip, proceed);
+  footer.append(pauseNote, skip, proceed);
 
   function cleanup() {
     if (!active) return;
@@ -383,6 +391,8 @@ export function showMathsQuiz(root, question, {
         ? 'Correct! Focused kick earned for your next pass or shot.'
         : `The correct answer is ${question.answer}. Keep playing and try the next one.`;
       feedback.classList.toggle('mq-success', correct);
+      panel.classList.add('mq-answered');
+      pauseNote.hidden = true;
       skip.hidden = true;
       proceed.hidden = false;
       proceed.textContent = correct ? 'Continue · Focused kick ready' : 'Continue';

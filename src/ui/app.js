@@ -4,7 +4,7 @@
 import { Match } from '../game/match.js';
 import { MathsPractice } from '../game/maths-practice.js';
 import { normalizeConfig, defaultConfig, humanCount, MODES, CONTROL, VIEW } from '../game/config.js';
-import { PHYSICS, STATES, AIM } from '../game/constants.js';
+import { PHYSICS, STATES, SET_PIECES, AIM } from '../game/constants.js';
 import { computeLayout, computeAimLayout } from './layout.js';
 import { computeDecisionLayout } from './decision-layout.js';
 import { isInShootingRange } from './camera.js';
@@ -47,6 +47,7 @@ export class App {
     this.lastTs = 0;
     this.layout = null;
     this.cameraTransition = null;
+    this.directKickCamera = null;
     this.possessionNotices = [];
     this.lastPossession = null;
     this.commandCues = [];
@@ -235,7 +236,9 @@ export class App {
   // who has carried the ball into range of goal.
   updateEye(m = this.match, updateFraming = true) {
     if (!this.layout || !this.match) return;
-    const player = m.activePlayerFor(0);
+    const directKicker = this.directKickPlayer(m);
+    this.layout.firstPerson = this.match.config.view === VIEW.FIRST || Boolean(directKicker);
+    const player = directKicker || m.activePlayerFor(0);
     this.layout.eyePlayer = player || null;
     if (updateFraming) this.updateShooter(player);
     if (!player) {
@@ -243,7 +246,7 @@ export class App {
       return;
     }
     const ball = m.ball;
-    const haveIt = ball.owner === player.id;
+    const haveIt = ball.owner === player.id || (directKicker && this.match.setPiece);
     if (!haveIt) {
       // Watch the ball.
       this.layout.lookAt = { ...ball.pos };
@@ -258,9 +261,29 @@ export class App {
     };
   }
 
+  directKickPlayer(view = this.match) {
+    const m = this.match;
+    const restart = m.setPiece;
+    const direct = m.state === STATES.SET_PIECE && restart
+      && [SET_PIECES.FREE_KICK, SET_PIECES.PENALTY].includes(restart.kind)
+      && m.config.humans.some((human) => human.team === restart.team);
+    if (direct) {
+      this.directKickCamera = { match: m, playerId: restart.takerId };
+    } else if (this.directKickCamera) {
+      // Follow the released kick from its taker until the next possession or
+      // stoppage. A different restart must never reuse an old kicker's eyes.
+      const context = this.directKickCamera;
+      if (context.match !== m || m.state !== STATES.PLAY || restart || m.ball.owner !== null) {
+        this.directKickCamera = null;
+      }
+    }
+    return this.directKickCamera ? view.getPlayer(this.directKickCamera.playerId) : null;
+  }
+
   // --------------------------------------------------------- screens
 
   goMenu() {
+    this.directKickCamera = null;
     this.mathsQuiz?.cleanup();
     this.mathsQuiz = null;
     this.mathsOpportunity = null;
@@ -292,6 +315,7 @@ export class App {
   }
 
   startMatch() {
+    this.directKickCamera = null;
     this.mathsQuiz?.cleanup();
     this.mathsQuiz = null;
     this.mathsOpportunity = null;
