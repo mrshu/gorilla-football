@@ -2,6 +2,7 @@
 // -timestep game loop and the wiring between input, match and renderer.
 
 import { Match } from '../game/match.js';
+import { MathsPractice } from '../game/maths-practice.js';
 import { normalizeConfig, defaultConfig, humanCount, MODES, CONTROL, VIEW } from '../game/config.js';
 import { PHYSICS, STATES, AIM } from '../game/constants.js';
 import { computeLayout, computeAimLayout } from './layout.js';
@@ -13,11 +14,12 @@ import { InputManager } from './input.js';
 import { AimInput } from './aiminput.js';
 import { RenderState } from './render-state.js';
 import { drawHud, getSpecialState } from './hud.js';
+import { showMathsQuiz } from './maths-quiz.js';
 import { loadThree } from './three-loader.js';
 import { RendererWebGL } from './renderer_webgl.js';
 import { showMenu, showHowTo, showSetup, showPause, showHalftime, showFullTime, showDecision } from './screens.js';
 
-const SCREEN = { MENU: 'menu', HOWTO: 'howto', SETUP: 'setup', MATCH: 'match', DECISION: 'decision', PAUSE: 'pause', HALFTIME: 'halftime', FULLTIME: 'fulltime' };
+const SCREEN = { MENU: 'menu', HOWTO: 'howto', SETUP: 'setup', MATCH: 'match', DECISION: 'decision', MATHS: 'maths', PAUSE: 'pause', HALFTIME: 'halftime', FULLTIME: 'fulltime' };
 const STORE_KEY = 'gorilla-football/setup';
 const CAMERA_TRANSITION_SECONDS = 0.72;
 const CAMERA_TRANSITION_HOLD = 0.12;
@@ -51,6 +53,9 @@ export class App {
     this.suggestionMarkers = [];
     this.renderState = new RenderState();
     this.frameSimulationDt = 0;
+    this.mathsPractice = new MathsPractice({ storage: safeStorage() });
+    this.mathsQuiz = null;
+    this.mathsOpportunity = null;
     this.resize();
     this.initWebGL();
     window.addEventListener('resize', () => this.resize());
@@ -129,6 +134,10 @@ export class App {
     this.updateLayerVisibility();
     this.updateLayout();
     if (this.screen === SCREEN.DECISION) this.showCurrentDecision();
+    if (this.screen === SCREEN.MATHS && this.mathsOpportunity) {
+      const flip = this.mathsOpportunity.humanIndex === 1 && h > w && this.match.config.mode === MODES.VERSUS;
+      this.overlay.classList.toggle('maths-quiz-flip', flip);
+    }
   }
 
   updateLayout() {
@@ -252,6 +261,9 @@ export class App {
   // --------------------------------------------------------- screens
 
   goMenu() {
+    this.mathsQuiz?.cleanup();
+    this.mathsQuiz = null;
+    this.mathsOpportunity = null;
     this.suggestionMarkers = [];
     this.aimInput.reset();
     this.aimInput.configure({ specialButtons: [] });
@@ -280,8 +292,12 @@ export class App {
   }
 
   startMatch() {
+    this.mathsQuiz?.cleanup();
+    this.mathsQuiz = null;
+    this.mathsOpportunity = null;
     const cfg = normalizeConfig({ ...this.setupState, seed: (Date.now() % 2147483647) | 0 });
     this.match = new Match(cfg);
+    this.mathsPractice?.configure(cfg);
     this.screen = SCREEN.MATCH;
     this.aimInput.reset();
     this.possessionNotices = [];
@@ -367,6 +383,42 @@ export class App {
     if (this.match && this.match.pendingDecision) this.openDecision();
   }
 
+  offerMathsQuestion() {
+    if (![SCREEN.MATCH, SCREEN.DECISION].includes(this.screen) || !this.mathsPractice) return;
+    if (this.aimInput.hasGesture || this.match.aimKicks.some(Boolean)) return;
+    const opportunity = this.mathsPractice.nextQuestion(this.match);
+    if (!opportunity) return;
+    this.mathsOpportunity = opportunity;
+    this.screen = SCREEN.MATHS;
+    this.input.reset();
+    this.aimInput.reset();
+    this.aimInput.configure({ specialButtons: [] });
+    this.suggestionMarkers = [];
+    this.frameSimulationDt = 0;
+    const flip = opportunity.humanIndex === 1 && this.layout.portrait && this.match.config.mode === MODES.VERSUS;
+    this.mathsQuiz = showMathsQuiz(this.overlay, opportunity.question, {
+      humanIndex: opportunity.humanIndex,
+      flip,
+      onAnswer: (correct, elapsedMs) => {
+        if (this.mathsOpportunity !== opportunity) return;
+        this.mathsPractice.answer(opportunity, correct, elapsedMs);
+        if (correct) this.match.grantMathsFocus(opportunity.humanIndex, opportunity.kickerId);
+      },
+      onSkip: () => {
+        this.mathsPractice.skip(opportunity);
+        this.finishMathsQuestion();
+      },
+      onContinue: () => this.finishMathsQuestion(),
+    });
+  }
+
+  finishMathsQuestion() {
+    this.mathsQuiz?.cleanup();
+    this.mathsQuiz = null;
+    this.mathsOpportunity = null;
+    this.resumeMatch();
+  }
+
   // ------------------------------------------------------------ loop
 
   frame(ts) {
@@ -384,12 +436,16 @@ export class App {
         if (this.isAim) this.feedAimInput();
         this.tickMatch(dtReal);
         if (this.match && this.match.pendingDecision) this.openDecision();
+        this.offerMathsQuestion();
       }
     } else if (this.screen === SCREEN.DECISION) {
       if (this.input.takePause()) this.pause();
       // If the decision went away by any route other than the panel, do not
       // strand the player on a frozen screen.
       else if (!this.match || !this.match.pendingDecision) this.closeDecision();
+      // A held joystick can defer the first offer on the opening frame.
+      // Retry once the touch ends while the decision still freezes play.
+      else this.offerMathsQuestion();
     }
     if (this.match) this.render(dtReal);
   }
@@ -647,7 +703,7 @@ export class App {
     const hud = this.hudCanvas !== this.canvas ? this.hudCanvas.getContext('2d') : null;
     if (hud) hud.clearRect(0, 0, this.layout.w, this.layout.h);
     this.renderer.draw(this.match, this.layout, {
-      dt: this.screen === SCREEN.DECISION ? 0 : dtReal,
+      dt: [SCREEN.DECISION, SCREEN.MATHS].includes(this.screen) ? 0 : dtReal,
       sticks: this.input.sticks,
       pressed: this.input.pressed,
       decision: this.screen === SCREEN.DECISION ? this.match.pendingDecision : null,
@@ -681,6 +737,10 @@ function vibrate(pattern) {
   } catch {
     /* unsupported */
   }
+}
+
+function safeStorage() {
+  try { return globalThis.localStorage; } catch { return null; }
 }
 
 function loadSetup() {

@@ -62,14 +62,15 @@ export function showHowTo(root, onBack) {
       <li><b>Tap the grass</b> to send your player running there. With the ball at their feet they dribble to the spot.</li>
       <li><b>Tap an opponent</b> who has the ball to get stuck in.</li>
       <li><b>Draw a line</b> with your finger and release. The ball is struck towards where the line ended.</li>
+      <li><b>Tap the tick</b> to play the suggested pass or shot.</li>
     </ul>
     <p>The kick itself is real football physics. A short line is driven along the grass hard enough to arrive and stop there; a long one is lifted and dropped on the spot. Draw further than your player can kick and it falls short, as it would.</p>
-    <p>Bend the line and you put curl on the ball, so you can bend one round a defender.</p>
+    <p>A simple curved line adds bounded curl. Loops and backtracking add no artificial spin, and a closed stroke is ignored.</p>
     <p>There is no separate pass and shoot. Draw a line that ends in the net and that was a shot.</p>
-    <p>Do nothing and your player just dribbles. Nothing is ever passed or shot for you, so every ball you play is one you drew. The other side will come and take it off you, though.</p>
+    <p>Possession slows play immediately, giving you time to choose. Drawing a kick freezes play and the camera; releasing it resumes play.</p>
     <p>Once you carry the ball inside thirty metres of goal the camera drops in behind you, low and facing the goal, to line up the shot. A yellow tick marks where the game reckons the ball should go next.</p>
     <p>The camera is a <b>side view</b> by default, the way football is televised. First person, looking out from your own player, is a setting on the pre-match screen.</p>
-    <p>The player on the ball is ringed. If you leave them alone too long they will play it themselves, so the match never stalls.</p>
+    <p>The player on the ball is ringed. Untaken restarts are played automatically after a few seconds.</p>
     <p>Restarts work the same way: aim and release to take the throw, corner, free kick or penalty.</p>
     <h4>One player</h4>
     <p>The older control styles are still here if you prefer them. Both give you a single outfield player, marked with a ring, seen from straight above.</p>
@@ -92,6 +93,10 @@ export function showHowTo(root, onBack) {
     <p>Between decisions you can still steer with the joystick and use the buttons whenever you like. Nothing forces you to wait for the panel.</p>
     <p><b>Keyboard (desktop):</b> P1 = WASD + J / K / L. P2 = arrow keys + 1 / 2 / 3. Esc pauses.</p>
     <p>Two-player matches give each person their own joystick and buttons so two people can hold the same device.</p>
+    <h4>Optional maths practice</h4>
+    <p>Choose a starting age for each player before kickoff. Occasional questions pause play during attacking possession. You can always skip; wrong answers reveal the answer and cost no turn.</p>
+    <p>A correct answer earns a <b>Focused kick</b>: your next pass or shot has less aiming error. The bonus lasts for this possession. Speed, loft and curl keep their usual physics.</p>
+    <p>Difficulty adapts to each player's answers and progress stays on this device. Switching maths off retains that progress; selecting a different starting age starts that player's practice afresh.</p>
   `));
   const back = el('button', 'btn', 'Back');
   back.onclick = onBack;
@@ -122,7 +127,10 @@ export function showSetup(root, initial, { onStart, onBack }) {
     const n = humanCount(state.mode);
 
     // Characters per human
-    for (let i = 0; i < n; i++) box.append(section(`Player ${i + 1} character${n > 1 ? ` (${state.mode === MODES.COOP ? 'team 1' : `team ${humanTeamIndex(state.mode, i) + 1}`})` : ''}`, charRow(i)));
+    for (let i = 0; i < n; i++) {
+      box.append(section(`Player ${i + 1} character${n > 1 ? ` (${state.mode === MODES.COOP ? 'team 1' : `team ${humanTeamIndex(state.mode, i) + 1}`})` : ''}`, charRow(i)));
+      box.append(section(`Player ${i + 1} maths practice`, mathsRow(i)));
+    }
 
     // Teams + jerseys
     for (let t = 0; t < 2; t++) box.append(section(`Team ${t + 1}${humanTeams().includes(t) ? ' (you)' : ' (AI)'}`, teamRow(t)));
@@ -198,6 +206,34 @@ export function showSetup(root, initial, { onStart, onBack }) {
     info.append(el('div', 'ability', `<b>${ab.name}</b> — ${ab.description}`));
     info.append(statBars(c));
     wrap.append(info);
+    return wrap;
+  }
+
+  function mathsRow(i) {
+    const wrap = el('div', 'maths-setup');
+    const label = el('label');
+    label.textContent = 'Starting age';
+    label.htmlFor = `maths-band-${i + 1}`;
+    const select = el('select', 'maths-band');
+    select.id = label.htmlFor;
+    select.setAttribute('aria-label', `Player ${i + 1} maths starting age`);
+    const options = [
+      'Off — just football', 'Age 5 · counting', 'Age 6 · addition',
+      'Age 7 · numbers to 20', 'Age 8 · multiplication', 'Age 9 · fractions',
+      'Age 10 · decimals', 'Age 11 · percentages', 'Age 12 · equations',
+      'Age 13 · algebra', 'Ages 14–15 · geometry', 'Age 16+ · advanced maths',
+    ];
+    options.forEach((name, band) => {
+      const option = el('option');
+      option.value = String(band);
+      option.textContent = name;
+      select.append(option);
+    });
+    select.value = String(state.humans[i].mathsBand || 0);
+    select.onchange = () => { state.humans[i].mathsBand = Number(select.value); };
+    const hint = el('p', 'foot');
+    hint.textContent = 'Occasional, skippable questions earn a more accurate kick. Difficulty adapts to each player and progress stays on this device.';
+    wrap.append(label, select, hint);
     return wrap;
   }
 

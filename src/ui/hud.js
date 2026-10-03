@@ -88,7 +88,7 @@ export function drawHud(ctx, match, layout, { hint = null, possessionNotices = [
     const p = match.aimControl ? match.activePlayerFor(i) : match.humanPlayer(i);
     if (!p) continue;
     const uses = Number.isFinite(p.ability.usesLeft) ? `${p.ability.usesLeft}` : '∞';
-    const label = `P${i + 1} ${p.character.name} · ${uses}`;
+    const label = `P${i + 1} ${p.character.name} · ${uses}${p.mathsFocus ? ' · FOCUS' : ''}`;
     const w = ctx.measureText(label).width + 12;
     const x = i === 0 ? 8 : layout.w - w - 8;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -113,7 +113,8 @@ function drawAimControls(ctx, match, layout, notices) {
     if (!player) continue;
     const colour = human === 0 ? '#ffe600' : '#00e5ff';
     const x = human === 0 ? 8 : layout.w - badgeW - 8;
-    const mode = owner?.id === player.id ? (match.state === STATES.PLAY && !player.isGK ? 'PLAY SLOWED · DRAW TO KICK' : 'ON BALL · DRAW TO KICK')
+    const mode = owner?.id === player.id ? (player.mathsFocus ? 'FOCUSED KICK · DRAW OR TAP TICK'
+      : match.state === STATES.PLAY && !player.isGK ? 'PLAY SLOWED · DRAW TO KICK' : 'ON BALL · DRAW TO KICK')
       : owner && owner.team !== player.team ? 'DEFENDING · TAP TO PRESS'
         : owner ? 'SUPPORT · TAP TO MOVE' : 'LOOSE BALL · TAP TO CHASE';
     ctx.fillStyle = 'rgba(9,11,24,0.88)';

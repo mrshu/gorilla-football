@@ -319,3 +319,32 @@ test('rotating during a decision rebuilds the pitch dock and refreshes choices',
   assert.equal(app.layout.controls.length, 0);
   assert.equal(app.input.layout, app.layout);
 });
+
+test('paced decisions retry deferred maths opportunities after a held touch ends', () => {
+  const app = harness({ control: CONTROL.ASSISTED });
+  app.screen = 'decision';
+  app.match.pendingDecision = { humanIndex: 0, options: [] };
+  app.input.takePause = () => false;
+  let checks = 0;
+  app.mathsPractice = { nextQuestion() { checks++; return null; } };
+  app.aimInput.onDown(pointer(1, 200, 700));
+  withAnimationFrame(() => app.frame(116));
+  assert.equal(checks, 0, 'held touch defers the maths question');
+  app.aimInput.onCancel(pointer(1, 200, 700));
+  withAnimationFrame(() => app.frame(132));
+  assert.equal(checks, 1, 'pending decision retries when gesture ends');
+  assert.equal(app.screen, 'decision');
+});
+
+test('paced maths retry yields to pause and decision closure', () => {
+  for (const pause of [true, false]) {
+    const app = harness({ control: CONTROL.ASSISTED });
+    app.screen = 'decision';
+    app.match.pendingDecision = pause ? { humanIndex: 0, options: [] } : null;
+    app.input.takePause = () => pause;
+    app.pause = () => { app.screen = 'pause'; };
+    app.offerMathsQuestion = () => assert.fail('pause or closed decision must not offer maths');
+    withAnimationFrame(() => app.frame(116));
+    assert.equal(app.screen, pause ? 'pause' : 'match');
+  }
+});

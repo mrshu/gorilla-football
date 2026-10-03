@@ -6,6 +6,7 @@
 // you, whichever way the camera happens to be facing.
 
 import { AIM } from '../game/constants.js';
+import { isUiKeyboardTarget } from './input.js';
 
 // Stroke sampling, in canvas pixels.
 const STROKE_MIN_PX = 6;
@@ -54,8 +55,10 @@ export class AimInput {
   }
 
   onKey(e) {
-    if (e.repeat || e.altKey || e.ctrlKey || e.metaKey) return;
     const key = e.key.toLowerCase();
+    // Decision buttons retain global Escape; dialogs can handle it themselves.
+    if (e.defaultPrevented || (isUiKeyboardTarget(e.target) && key !== 'escape')) return;
+    if (e.repeat || e.altKey || e.ctrlKey || e.metaKey) return;
     if (key === 'escape' || key === 'p') this.pauseRequested = true;
     const human = key === 'l' ? 0 : key === '3' ? 1 : -1;
     const button = this.specialButtons.find((b) => b.human === human);

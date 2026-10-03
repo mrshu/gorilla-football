@@ -200,3 +200,31 @@ test('gesture projection and kicker identity stay fixed when live camera and own
   assert.deepEqual(release.dir, { x: 1, y: 0 });
   assert.deepEqual(release.path, [{ x: 200, y: 700 }, { x: 200, y: 500 }]);
 });
+
+test('maths UI keyboard use cannot queue whole-team specials or pause', () => {
+  const input = makeInput();
+  input.configure({ specialButtons: [specialButton, { ...specialButton, human: 1 }] });
+  for (const key of ['l', '3', 'p']) {
+    input.onKey({ key, target: { closest: () => ({ tagName: 'BUTTON' }) },
+      preventDefault: () => assert.fail('UI browser defaults must survive') });
+    input.onKey({ key, target: { isContentEditable: true },
+      preventDefault: () => assert.fail('editing defaults must survive') });
+    input.onKey({ key, defaultPrevented: true });
+  }
+  assert.deepEqual(input.drainSpecials(), []);
+  assert.equal(input.takePause(), false);
+  input.onKey({ key: 'l', target: { closest: () => null } });
+  input.onKey({ key: '3', target: { closest: () => null } });
+  input.onKey({ key: 'p', target: { closest: () => null } });
+  assert.deepEqual(input.drainSpecials(), [0, 1], 'canvas and body retain gameplay keys');
+  assert.equal(input.takePause(), true);
+});
+
+test('unhandled Escape still pauses from decision buttons while handled maths Escape does not', () => {
+  const input = makeInput();
+  const target = { closest: () => ({ tagName: 'BUTTON' }) };
+  input.onKey({ key: 'Escape', target });
+  assert.equal(input.takePause(), true);
+  input.onKey({ key: 'Escape', target, defaultPrevented: true });
+  assert.equal(input.takePause(), false);
+});

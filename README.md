@@ -167,6 +167,25 @@ uses the arrow keys + `1` / `2` / `3`, `Esc` pauses. `Esc` also works while a
 decision panel is open.
 In whole-team play, `L` and `3` activate player one's and player two's special.
 
+## Maths practice
+
+Optional maths practice is selected per player in setup. Choose a starting age
+(5 to 16+) or leave it off for ordinary football. The question engine is ported
+from `football-puck-chaos` as a self-contained ES module: all eleven bands,
+adaptive difficulty, mastery, plausible choices and proportional diagrams.
+
+The first eligible attacking possession offers a question, then roughly every
+third one; kickoff introduces the mode. Play pauses with no countdown. Skip
+without penalty, or answer and continue after feedback. Wrong answers never
+cost the ball or a turn. A correct answer earns a **Focused kick** with 40% of
+the usual aiming error on the next pass or shot in that possession. Power,
+loft, curl and character abilities keep their normal behavior.
+
+Player 1 and player 2 have separate saved learning profiles. Difficulty adapts
+to correctness and response time. Switching practice off retains progress;
+changing a starting age resets only that player's profile. Storage failures
+fall back to in-memory progress, and maths randomness never affects football.
+
 ## Modes
 
 - **1 Player vs AI** — you control one outfield player, everyone else is AI.

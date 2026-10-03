@@ -101,6 +101,36 @@ export class Match {
     return this.players.find((p) => p.human === index) || null;
   }
 
+  // A maths answer rewards this possession with one more accurate normal
+  // kick. The snapshot must still name the human's ready carrier/taker.
+  grantMathsFocus(humanIndex, kickerId) {
+    this.clearLostMathsFocus();
+    const human = Number.isInteger(humanIndex) ? this.config.humans[humanIndex] : null;
+    const restart = [STATES.KICKOFF, STATES.SET_PIECE].includes(this.state) ? this.setPiece : null;
+    if (!human || (this.state !== STATES.PLAY && (!restart || restart.lerp < 1))) return false;
+    const activeId = restart ? restart.takerId : this.ball.owner;
+    const player = activeId !== null ? this.getPlayer(activeId) : null;
+    if (!player || player.id !== kickerId || player.team !== human.team
+        || (!this.aimControl && player.human !== humanIndex) || player.sentOff
+        || player.stun > 0 || player.frozen > 0 || player.kickCooldown > 0) return false;
+    player.mathsFocus = true;
+    return true;
+  }
+
+  clearLostMathsFocus() {
+    const activeId = this.setPiece ? this.setPiece.takerId : this.ball.owner;
+    for (const player of this.players) {
+      if (player.mathsFocus && (player.id !== activeId || player.sentOff)) player.mathsFocus = false;
+    }
+  }
+
+  mathsAccuracyScale(player) {
+    this.clearLostMathsFocus();
+    if (!player.mathsFocus) return 1;
+    player.mathsFocus = false;
+    return 0.4;
+  }
+
   getPlayer(id) {
     return this.players[id];
   }
@@ -145,6 +175,7 @@ export class Match {
   // ------------------------------------------------------------- stepping
 
   step(dt = PHYSICS.dt) {
+    this.clearLostMathsFocus();
     if (this.state === STATES.HALFTIME || this.state === STATES.FULLTIME) return;
     // A pending decision freezes everything: the clock, the ball and all 22
     // players. Nothing advances until resolveDecision() is called.
@@ -173,6 +204,7 @@ export class Match {
         break;
     }
     this.consumeHumanButtons();
+    this.clearLostMathsFocus();
   }
 
   tickTimers(dt) {
@@ -213,6 +245,7 @@ export class Match {
     this.decisionCarry = null;
     const ball = this.ball;
     ball.owner = null;
+    for (const player of this.players) if (player.mathsFocus) player.mathsFocus = false;
     ball.homing = null;
     ball.spin = 0;
     ball.unstoppable = false;
@@ -601,7 +634,7 @@ export class Match {
   aimKick(humanIndex, dir, power) {
     if (!this.canKick(humanIndex)) return false;
     const l = Math.hypot(dir.x, dir.y);
-    if (!Number.isFinite(l) || l < 1e-6) return false;
+    if (!Number.isFinite(l) || l < 1e-6 || !Number.isFinite(power)) return false;
     this.aimKicks[humanIndex] = { dir: { x: dir.x / l, y: dir.y / l }, power: clamp(power, 0, 1) };
     return true;
   }
@@ -712,6 +745,7 @@ export class Match {
   // Apply queued kicks and presses. Called before the world is stepped so a
   // release lands on the same frame the player let go.
   applyAimInputs() {
+    this.clearLostMathsFocus();
     for (let i = 0; i < this.aimKicks.length; i++) {
       const kick = this.aimKicks[i];
       this.aimKicks[i] = null;
@@ -729,11 +763,12 @@ export class Match {
       const teamIndex = this.config.humans[i]?.team ?? 0;
       if (this.state === STATES.SET_PIECE || this.state === STATES.KICKOFF) {
         const taker = this.getPlayer(this.setPiece.takerId);
+        if (taker.sentOff || taker.stun > 0 || taker.frozen > 0 || taker.kickCooldown > 0) continue;
         this.playBall(taker, kick, { setPieceKind: this.setPiece.kind });
         continue;
       }
       const owner = this.getPlayer(this.ball.owner);
-      if (owner.team !== teamIndex) continue;
+      if (owner.team !== teamIndex || owner.sentOff || owner.stun > 0 || owner.frozen > 0) continue;
       this.playBall(owner, kick, {});
     }
     for (let i = 0; i < this.dribbles.length; i++) {
@@ -759,6 +794,7 @@ export class Match {
     const dir = norm(add(scale(facing, 1), scale(norm(sub(goal, p.pos)), 0.65)));
     const speed = AIM.dribbleSpeed + p.stats.speed * 0.35;
     this.ball.owner = null;
+    this.clearLostMathsFocus();
     this.ball.homing = null;
     this.ball.unstoppable = false;
     this.ball.pos = add(p.pos, scale(dir, PHYSICS.playerRadius + PHYSICS.ballRadius + 0.1));
@@ -784,7 +820,7 @@ export class Match {
     // Aiming is forgiving at low power and demanding at high power, and a
     // better striker strays less either way.
     const spread = (AIM.baseSpread + power * AIM.powerSpread) * (0.55 + kicker.phys.shotSpread);
-    const err = this.rng.gaussian() * spread;
+    const err = this.rng.gaussian() * spread * this.mathsAccuracyScale(kicker);
     const aimed = fromAngle(angle(dir) + err);
     const lofted = power > AIM.loftPower;
     const vz = lofted ? (power - AIM.loftPower) * AIM.loftScale : 0;
@@ -856,7 +892,7 @@ export class Match {
     // Aim is not perfect: a harder kick and a weaker striker stray more.
     const effort = plan.speed / Math.max(1, kicker.phys.shotSpeed);
     const spread = (AIM.baseSpread + effort * AIM.powerSpread) * (0.55 + kicker.phys.shotSpread);
-    const dir = fromAngle(angle(plan.dir) + this.rng.gaussian() * spread);
+    const dir = fromAngle(angle(plan.dir) + this.rng.gaussian() * spread * this.mathsAccuracyScale(kicker));
     const speed = plan.speed;
     const target = plan.target;
 
@@ -1151,6 +1187,7 @@ export class Match {
       if (outcome === 'parry') return;
     }
     ball.owner = p.id;
+    this.clearLostMathsFocus();
     ball.homing = null;
     ball.spin = 0;
     ball.unstoppable = false;
@@ -1223,6 +1260,7 @@ export class Match {
       owner.kickCooldown = Math.max(owner.kickCooldown, 0.3);
     }
     ball.owner = null;
+    this.clearLostMathsFocus();
   }
 
   // Called whenever a player touches the ball (collect, kick, deflect).
@@ -1260,6 +1298,7 @@ export class Match {
     const ball = this.ball;
     const d = len(dir) > 0.01 ? norm(dir) : { x: this.teams[p.team].attackDir, y: 0 };
     ball.owner = null;
+    this.clearLostMathsFocus();
     ball.homing = null;
     ball.spin = 0;
     ball.unstoppable = false;
@@ -1299,7 +1338,7 @@ export class Match {
     const travel = d / speed;
     const lead = add(to.pos, scale(to.vel || { x: 0, y: 0 }, travel * 0.75));
     let dir = norm(sub(lead, p.pos));
-    const err = this.rng.gaussian() * p.phys.passSpread * (opts.loft ? 1.4 : 1);
+    const err = this.rng.gaussian() * p.phys.passSpread * (opts.loft ? 1.4 : 1) * this.mathsAccuracyScale(p);
     dir = fromAngle(angle(dir) + err);
     let vz = 0;
     if (opts.loft || d > 32) {
@@ -1314,7 +1353,7 @@ export class Match {
     const goal = goalCenter(team.attackDir);
     const target = { x: goal.x, y: goal.y + clamp(aimY, -1, 1) * (PITCH.goalWidth / 2 - 0.6) };
     let dir = norm(sub(target, p.pos));
-    const err = this.rng.gaussian() * p.phys.shotSpread;
+    const err = this.rng.gaussian() * p.phys.shotSpread * this.mathsAccuracyScale(p);
     dir = fromAngle(angle(dir) + err);
     const d = dist(p.pos, goal);
     const speed = p.phys.shotSpeed * (d > 40 ? 0.9 : 1);
@@ -1328,6 +1367,7 @@ export class Match {
   launchHoming(p, opts) {
     const ball = this.ball;
     ball.owner = null;
+    this.clearLostMathsFocus();
     ball.homing = { point: opts.point || null, playerId: opts.playerId ?? null, speed: opts.speed || 30, assistFinish: Boolean(opts.assistFinish) };
     ball.unstoppable = Boolean(opts.unstoppable);
     const target = ball.homing.point || this.getPlayer(ball.homing.playerId).pos;
@@ -1637,6 +1677,7 @@ export class Match {
   handleSentOff(p) {
     this.releaseBall();
     if (this.ball.owner === p.id) this.ball.owner = null;
+    this.clearLostMathsFocus();
     p.desiredVel = { x: 0, y: 0 };
     p.vel = { x: 0, y: 0 };
     if (p.human !== null) {
@@ -1745,6 +1786,7 @@ export class Match {
     this.goalTimer = TIMING.goalCelebration;
     this.pendingKickoffTeam = 1 - teamIdx;
     this.ball.owner = null;
+    this.clearLostMathsFocus();
     this.ball.homing = null;
     this.ball.spin = 0;
     this.ball.unstoppable = false;
@@ -1759,6 +1801,7 @@ export class Match {
     this.ball.spin = 0;
     this.ball.vel = { x: 0, y: 0 };
     this.setPiece = null;
+    this.clearLostMathsFocus();
     if (this.clock.half === 1) {
       this.state = STATES.HALFTIME;
       this.emit('halftime', { score: [this.teams[0].score, this.teams[1].score] });

@@ -69,8 +69,8 @@ export function defaultConfig() {
       { presetId: TEAM_PRESETS[1].id, jerseyId: TEAM_PRESETS[1].defaultJersey },
     ],
     humans: [
-      { characterId: 'gorilla' },
-      { characterId: 'plumber' },
+      { characterId: 'gorilla', mathsBand: 0 },
+      { characterId: 'plumber', mathsBand: 0 },
     ],
   };
 }
@@ -108,7 +108,9 @@ export function normalizeConfig(input) {
     getCharacter(characterId);
     const team = humanTeamIndex(cfg.mode, i);
     const slot = cfg.mode === MODES.COOP ? HUMAN_SLOTS[i] : HUMAN_SLOTS[0];
-    humans.push({ index: i, team, slot, characterId });
+    const band = Number(h.mathsBand);
+    const mathsBand = Number.isInteger(band) && band >= 0 && band <= 11 ? band : 0;
+    humans.push({ index: i, team, slot, characterId, mathsBand });
     teams[team].roster[slot] = characterId;
   }
 

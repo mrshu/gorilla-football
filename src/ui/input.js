@@ -4,6 +4,12 @@
 
 import { pointInCircle, pointInRect } from './layout.js';
 
+export function isUiKeyboardTarget(target) {
+  return Boolean(target?.isContentEditable || target?.closest?.(
+    'input, select, textarea, button, a[href], [contenteditable=""], [contenteditable="true"], [role="button"], [role="textbox"], [role="combobox"]',
+  ));
+}
+
 export class InputManager {
   constructor(canvas) {
     this.canvas = canvas;
@@ -129,7 +135,12 @@ export class InputManager {
   // Keyboard fallback for desktop testing.
   // P1: WASD + J/K/L, P2: arrows + numpad 1/2/3, Esc pauses.
   onKey(e, down) {
+    const uiControl = isUiKeyboardTarget(e.target);
     const k = e.key.toLowerCase();
+    // Native form navigation and button activation belong to the focused UI.
+    // A key released after focus moves must still clear its gameplay state.
+    // Unhandled Escape remains the pause shortcut on decision-panel buttons.
+    if (down && (e.defaultPrevented || (uiControl && k !== 'escape'))) return;
     if (down) this.keys.add(k);
     else this.keys.delete(k);
     if (down && (k === 'escape' || k === 'p')) this.pauseRequested = true;
@@ -142,7 +153,7 @@ export class InputManager {
       if (down) this.pressed[map[k]] = true;
       else delete this.pressed[map[k]];
     }
-    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
+    if (!uiControl && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
   }
 
   keyboardVector(human) {
