@@ -6,10 +6,10 @@
 // here. World axes are (x along the pitch, y across it, z up); three.js is
 // y-up, so the mapping is (x, z, -y), which preserves handedness.
 
-import { PITCH } from '../game/constants.js';
-import { Camera, frameSideline, frameFirstPerson, sidelinePose, shootingPose, isInShootingRange, applyPose, blendPose } from './camera.js';
+import { PITCH, STATES } from '../game/constants.js';
+import { Camera, frameFirstPerson, sidelinePose, shootingPose, applyPose, blendPose, keepBallInFrame } from './camera.js';
 import { pitchTexture, crowdTexture, ballTexture } from './textures.js';
-import { loadFootballers, createFootballer, animateFootballer } from './footballers.js';
+import { PlayerSpriteLibrary } from './player-sprites.js';
 
 const toThree = (THREE, x, y, z = 0) => new THREE.Vector3(x, z, -y);
 
@@ -20,8 +20,8 @@ export class RendererWebGL {
     this.camera = new Camera(); // shared with input; the source of truth
     this.smoothBall = null;
     this.playerViews = new Map();
-    this.spriteTextures = new Map();
-    this.footballers = null;
+    this.playerSprites = new PlayerSpriteLibrary(THREE);
+    this.spriteTextures = this.playerSprites.textures;
     this.spriteGeometry = new THREE.PlaneGeometry(2 / 3, 1);
     this.pose = null;
 
@@ -46,21 +46,6 @@ export class RendererWebGL {
     this.buildFloodlights();
     this.buildGoals();
     this.buildBall();
-    this.loadPlayers();
-  }
-
-  // Rigged humanoids are the player model. The cutout sprites only stand in
-  // if the models fail to load, and the primitive rig until either arrives.
-  loadPlayers() {
-    loadFootballers(this.THREE)
-      .then((kit) => {
-        this.footballers = kit;
-        this.invalidatePlayerViews();
-      })
-      .catch((err) => {
-        console.warn('footballer models unavailable, using sprites', err);
-        this.loadPlayerSprites();
-      });
   }
 
   // ------------------------------------------------------------- scenery
@@ -266,36 +251,26 @@ export class RendererWebGL {
   // High-quality ImageGen cutouts are the primary broadcast character view.
   // They live as real world-space planes inside the Three.js scene, so they
   // still depth-test, scale with the pitch, and move with the simulation.
-  loadPlayerSprites() {
-    const shapes = ['gorilla', 'plumber', 'tortoise', 'rocket', 'wizard', 'penguin', 'yeti'];
-    const load = (path) => new Promise((resolve) => {
-      const image = new Image();
-      image.onload = () => {
-        const texture = new this.THREE.Texture(image);
-        texture.needsUpdate = true;
-        texture.minFilter = this.THREE.LinearFilter;
-        texture.magFilter = this.THREE.LinearFilter;
-        texture.generateMipmaps = true;
-        if (this.THREE.sRGBEncoding !== undefined) texture.encoding = this.THREE.sRGBEncoding;
-        resolve(texture);
-      };
-      image.onerror = () => resolve(null);
-      image.src = path;
-    });
-    const loads = shapes.map(async (shape) => {
-      const [idle, run] = await Promise.all([
-        load(`public/assets/player-sprite-${shape}.png`),
-        load(`public/assets/player-sprite-${shape}-run.png`),
-      ]);
-      if (idle && run) this.spriteTextures.set(shape, { idle, run });
-    });
-    Promise.all(loads).then(() => this.invalidatePlayerViews());
+  loadPlayerSprites(players) {
+    for (const p of players) {
+      if (!p.sentOff) this.playerSprites.load(p.character.look.shape);
+    }
   }
 
   removePlayerView(view) {
     if (!view) return;
     this.scene.remove(view.group);
     if (view.shadow) this.scene.remove(view.shadow);
+    const geometries = new Set();
+    const materials = new Set();
+    const collect = (object) => {
+      if (object.geometry && object.geometry !== this.spriteGeometry) geometries.add(object.geometry);
+      for (const material of [object.material].flat()) if (material) materials.add(material);
+    };
+    view.group.traverse(collect);
+    view.shadow?.traverse(collect);
+    for (const geometry of geometries) geometry.dispose();
+    for (const material of materials) material.dispose();
   }
 
   invalidatePlayerViews() {
@@ -308,12 +283,11 @@ export class RendererWebGL {
     const textures = this.spriteTextures.get(p.character.look.shape);
     const material = new THREE.ShaderMaterial({
       uniforms: {
-        mapIdle: { value: textures.idle },
-        mapRun: { value: textures.run },
+        map: { value: textures.idle },
+        texelSize: { value: new THREE.Vector2(1 / textures.idle.image.width, 1 / textures.idle.image.height) },
         primary: { value: new THREE.Color(p.jersey.primary) },
         secondary: { value: new THREE.Color(p.jersey.secondary) },
         accent: { value: new THREE.Color(p.character.look.accent) },
-        runMix: { value: 0 },
       },
       vertexShader: PLAYER_SPRITE_VERTEX,
       fragmentShader: PLAYER_SPRITE_FRAGMENT,
@@ -342,7 +316,7 @@ export class RendererWebGL {
 
     const shadow = new THREE.Mesh(
       new THREE.CircleGeometry(0.32 * size, 18),
-      new THREE.MeshBasicMaterial({ color: p.character.look.accent, transparent: true, opacity: 0.16, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ color: 0x08101a, transparent: true, opacity: 0.26, depthWrite: false }),
     );
     shadow.rotation.x = -Math.PI / 2;
     shadow.scale.set(1.45, 0.58, 1);
@@ -355,31 +329,13 @@ export class RendererWebGL {
       ring,
       shadow,
       material,
+      textures,
       phase: Math.random() * Math.PI * 2,
       bob: 0,
       height,
       size,
       signature,
     };
-    this.playerViews.set(p.id, view);
-    return view;
-  }
-
-  humanoidPlayerView(p, signature) {
-    const { THREE, scene } = this;
-    const footballer = createFootballer(this.footballers, p);
-    const group = new THREE.Group();
-    group.add(footballer.root);
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.5, 0.66, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffd35c, transparent: true, opacity: 0.92, side: THREE.DoubleSide }),
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.03;
-    ring.visible = false;
-    group.add(ring);
-    scene.add(group);
-    const view = { kind: 'humanoid', group, ring, footballer, heading: null, bob: 0, signature };
     this.playerViews.set(p.id, view);
     return view;
   }
@@ -392,19 +348,19 @@ export class RendererWebGL {
   playerView(p) {
     const { THREE, scene } = this;
     let view = this.playerViews.get(p.id);
-    const signature = [p.character.id, p.jersey.primary, p.jersey.secondary].join('|');
+    const shape = p.character.look.shape;
+    const kind = this.spriteTextures.has(shape) ? 'sprite' : 'primitive';
+    const signature = [p.character.id, shape, p.jersey.primary, p.jersey.secondary, kind].join('|');
     if (view && view.signature === signature) return view;
     // Matches can be restarted with a different character or kit while the
     // renderer lives on. Rebuild that player's visual instead of leaving the
     // previous model cached under the same simulation id.
     if (view) this.removePlayerView(view);
     const look = p.character.look;
-    const shape = look.shape;
     // Keep species readable without letting the old look-size range turn
     // ordinary players into giants next to a regulation goal.
     const size = 1 + (look.size - 1) * 0.45;
-    if (this.footballers) return this.humanoidPlayerView(p, signature);
-    if (this.spriteTextures.has(shape)) return this.spritePlayerView(p, signature, size);
+    if (kind === 'sprite') return this.spritePlayerView(p, signature, size);
     const S = (n) => n * size;
     const group = new THREE.Group();
 
@@ -600,7 +556,7 @@ export class RendererWebGL {
     group.scale.y = 1.08;
 
     scene.add(group);
-    view = { group, ring, torso, legs, arms, head, phase: Math.random() * Math.PI * 2, bob: 0, size, signature };
+    view = { kind: 'primitive', group, ring, torso, legs, arms, head, phase: Math.random() * Math.PI * 2, bob: 0, size, signature };
     this.playerViews.set(p.id, view);
     return view;
   }
@@ -608,7 +564,6 @@ export class RendererWebGL {
   // Swing the limbs in time with how fast the player is actually moving.
   animate(view, p, dt) {
     if (view.kind === 'sprite') return this.animateSprite(view, p, dt);
-    if (view.kind === 'humanoid') return animateFootballer(view.footballer, p, dt);
     const speed = Math.hypot(p.vel.x, p.vel.y);
     view.phase += speed * dt * 1.7;
     const swing = Math.min(1, speed / 7) * 0.85;
@@ -640,19 +595,10 @@ export class RendererWebGL {
     view.plane.position.y = planeHeight * 0.5;
     view.plane.scale.set(height * (slide ? 1.06 : 1 - cycle * 0.018), planeHeight, height);
     view.plane.rotation.z = slide ? (p.facing.x >= 0 ? -0.58 : 0.58) : stride;
-    view.material.uniforms.runMix.value = slide ? 1 : moving ? 0.5 + cycle * 0.5 : 0;
+    // These are different painted poses, not registered animation frames.
+    // Switching crisply avoids translucent double limbs from cross-fading.
+    view.material.uniforms.map.value = moving || slide ? view.textures.run : view.textures.idle;
     view.bob = slide ? 0 : Math.sin(view.phase * 2) * Math.min(0.04, speed * 0.004);
-  }
-
-  // The model faces +z; turn it toward `facing`, quickly but not in one frame,
-  // so a change of direction reads as a turn rather than a snap.
-  turnHumanoid(view, p, dt) {
-    const target = Math.atan2(p.facing.x, -p.facing.y);
-    if (view.heading === null) view.heading = target;
-    let delta = target - view.heading;
-    delta = Math.atan2(Math.sin(delta), Math.cos(delta));
-    view.heading += delta * (1 - Math.exp(-16 * dt));
-    view.group.rotation.set(0, view.heading, 0);
   }
 
   faceSpriteToCamera(view, p) {
@@ -671,13 +617,23 @@ export class RendererWebGL {
 
   updateCamera(match, layout, dt) {
     if (layout.aiming) return;
+    const returning = !layout.shooter && (this.shotBlend > 0.01 || this.returningShot);
+    const previousFrame = this.pose && returning && dt < 0.9
+      && this.camera.viewport.w === layout.w && this.camera.viewport.h === layout.h
+      ? this.camera.ballFrame || this.camera.project({ ...match.ball.pos, z: Math.max(0.22, (match.ball.z || 0) + 0.22) }) : null;
     const target = match.ball.pos;
     if (!this.smoothBall) this.smoothBall = { ...target };
-    const k = 1 - Math.exp(-6 * Math.max(0, Math.min(dt, 0.1)));
+    const k = 1 - Math.exp(-18 * Math.max(0, Math.min(dt, 0.1)));
     this.smoothBall.x += (target.x - this.smoothBall.x) * k;
     this.smoothBall.y += (target.y - this.smoothBall.y) * k;
     this.camera.setViewport(layout.w, layout.h);
-    this.applyFraming(layout, dt);
+    this.applyFraming(layout, dt, returning);
+    if (!layout.firstPerson) this.pose = keepBallInFrame(this.camera, this.pose, match.ball, layout, previousFrame, dt);
+    else if (match.state === STATES.PLAY && match.ball.owner == null) {
+      // Follow a released kick at its real height by turning the head;
+      // keep the eased first-person eye where it already is.
+      this.pose = keepBallInFrame(this.camera, this.pose, match.ball, layout);
+    }
     // Whatever framing was chosen, the three.js camera has to be pointed the
     // same way as the one the input and overlay use, or the line you draw
     // lands somewhere other than where the pitch appears to be.
@@ -697,32 +653,44 @@ export class RendererWebGL {
   }
 
   // Point `this.camera` (the shared projection) at whichever view applies.
-  applyFraming(layout, dt) {
+  applyFraming(layout, dt, returning = false) {
     if (layout.firstPerson && layout.eyePlayer) {
+      if (!this.wasFirstPerson || this.eyePlayerId !== layout.eyePlayer.id) {
+        this.smoothedLook = { ...layout.lookAt };
+      }
+      this.wasFirstPerson = true;
+      this.eyePlayerId = layout.eyePlayer.id;
+      this.camera.ballFrame = null;
       frameFirstPerson(this.camera, layout.eyePlayer, this.smoothLook(layout, dt), layout.portrait);
       this.applySmoothedPose(cameraPose(this.camera), dt);
       this.shotBlend = 0;
+      this.returningShot = false;
       return;
     }
+    this.wasFirstPerson = false;
     // Drop in behind the player on the ball once they are in range of goal,
     // easing between the two so it reads as a camera move, not a cut.
-    const want = layout.shooter ? 1 : 0;
-    const rate = 1 - Math.exp(-1.8 * Math.max(0, Math.min(dt, 0.2)));
+    const shooter = layout.shooter;
+    const want = shooter ? 1 : 0;
+    const rate = 1 - Math.exp(-(shooter ? 1.8 : 12) * Math.max(0, Math.min(dt, 0.2)));
     this.shotBlend = (this.shotBlend || 0) + (want - (this.shotBlend || 0)) * rate;
     const wide = sidelinePose(this.smoothBall, layout.viewAttackDir, layout.portrait);
     if (this.shotBlend < 0.01 || !layout.shotAnchor) {
-      this.applySmoothedPose(wide, dt);
+      this.applySmoothedPose(wide, dt, returning ? 6 : 18);
+      this.returningShot = Boolean(returning && Math.hypot(this.pose.eye.x - wide.eye.x,
+        this.pose.eye.y - wide.eye.y, this.pose.eye.z - wide.eye.z) > 3);
       return;
     }
     const close = shootingPose(layout.shotAnchor.carrier, layout.shotAnchor.goal, layout.portrait);
-    this.applySmoothedPose(blendPose(wide, close, this.shotBlend), dt);
+    this.applySmoothedPose(blendPose(wide, close, this.shotBlend), dt, shooter ? 1.65 : 6);
+    this.returningShot = !shooter;
   }
 
-  applySmoothedPose(target, dt) {
+  applySmoothedPose(target, dt, rate = 1.65) {
     if (!this.pose || dt >= 0.9) {
       this.pose = target;
     } else {
-      const amount = 1 - Math.exp(-1.65 * Math.max(0, Math.min(dt, 0.2)));
+      const amount = 1 - Math.exp(-rate * Math.max(0, Math.min(dt, 0.2)));
       this.pose = blendPose(this.pose, target, amount);
     }
     applyPose(this.camera, this.pose);
@@ -743,6 +711,9 @@ export class RendererWebGL {
     this.smoothBall = { ...match.ball.pos };
     this.smoothedLook = layout && layout.lookAt ? { ...layout.lookAt } : null;
     this.pose = null;
+    this.returningShot = false;
+    this.camera.ballFrame = null;
+    this.wasFirstPerson = false;
     if (layout) this.updateCamera(match, layout, 1);
   }
 
@@ -753,6 +724,7 @@ export class RendererWebGL {
 
   draw(match, layout, opts = {}) {
     const { THREE } = this;
+    this.loadPlayerSprites(match.players);
     this.updateCamera(match, layout, opts.dt || 0);
     const hideNear = !layout.firstPerson;
     for (const m of this.nearStand) m.visible = !hideNear;
@@ -784,7 +756,6 @@ export class RendererWebGL {
       }
       view.group.position.copy(toThree(THREE, p.pos.x, p.pos.y, 0));
       if (view.kind === 'sprite') this.faceSpriteToCamera(view, p);
-      else if (view.kind === 'humanoid') this.turnHumanoid(view, p, opts.animationDt ?? opts.dt ?? 0);
       else {
         // Face the way they are running.
         const f = p.facing;
@@ -809,6 +780,9 @@ export class RendererWebGL {
   }
 
   dispose() {
+    this.invalidatePlayerViews();
+    this.playerSprites.dispose();
+    this.spriteGeometry.dispose();
     this.renderer.dispose();
   }
 }
@@ -824,16 +798,15 @@ const PLAYER_SPRITE_VERTEX = `
 `;
 
 const PLAYER_SPRITE_FRAGMENT = `
-  uniform sampler2D mapIdle;
-  uniform sampler2D mapRun;
+  uniform sampler2D map;
+  uniform vec2 texelSize;
   uniform vec3 primary;
   uniform vec3 secondary;
   uniform vec3 accent;
-  uniform float runMix;
   varying vec2 vUv;
 
   vec4 sprite(vec2 uv) {
-    return mix(texture2D(mapIdle, uv), texture2D(mapRun, uv), runMix);
+    return texture2D(map, uv);
   }
 
   vec3 tint(vec3 source, vec3 target) {
@@ -843,10 +816,10 @@ const PLAYER_SPRITE_FRAGMENT = `
 
   void main() {
     vec4 texel = sprite(vUv);
-    vec2 px = vec2(0.0018, 0.0012);
-    float neighbour = max(max(sprite(vUv + vec2(px.x, 0.0)).a, sprite(vUv - vec2(px.x, 0.0)).a), max(sprite(vUv + vec2(0.0, px.y)).a, sprite(vUv - vec2(0.0, px.y)).a));
-    float edge = max(0.0, neighbour - texel.a);
     if (texel.a < 0.06) {
+      vec2 px = texelSize;
+      float neighbour = max(max(sprite(vUv + vec2(px.x, 0.0)).a, sprite(vUv - vec2(px.x, 0.0)).a), max(sprite(vUv + vec2(0.0, px.y)).a, sprite(vUv - vec2(0.0, px.y)).a));
+      float edge = max(0.0, neighbour - texel.a);
       if (edge < 0.08) discard;
       gl_FragColor = vec4(accent, edge * 0.78);
       return;

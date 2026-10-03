@@ -4,6 +4,7 @@
 
 import { PITCH, STATES } from '../game/constants.js';
 import { clamp } from '../game/vec.js';
+import { mathsStatus } from './hud.js';
 
 const GRASS_A = '#267254';
 const GRASS_B = '#1e6049';
@@ -420,10 +421,13 @@ export class Renderer {
       const w = ctx.measureText(label).width + 12;
       const x = i === 0 ? 8 : layout.w - w - 8;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      roundRect(ctx, x, chipY, w, 18, 6);
+      roundRect(ctx, x, chipY, w, 34, 6);
       ctx.fill();
       ctx.fillStyle = ready ? col : 'rgba(255,255,255,0.5)';
       ctx.fillText(label, x + 6, chipY + 9);
+      ctx.font = '500 10px system-ui, sans-serif';
+      ctx.fillStyle = '#adb8c7';
+      ctx.fillText(mathsStatus(match, i), x + 6, chipY + 25, w - 12);
     }
 
     // Cards ticker

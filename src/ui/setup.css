@@ -92,7 +92,7 @@
 .setup .setup-player-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 18px; }
 .setup .setup-player-header h3 { margin: 0; color: var(--player-accent); font-size: 16px; line-height: 1.3; letter-spacing: 0; text-transform: none; }
 .setup .setup-player-team { font-size: 12px; color: var(--muted); }
-.setup .player-maths { margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(245, 244, 233, 0.12); }
+.setup .player-maths { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid rgba(245, 244, 233, 0.12); }
 .setup .setup-team + .setup-team { margin-top: 22px; padding-top: 20px; border-top: 1px solid rgba(245, 244, 233, 0.12); }
 .setup .chips { gap: 6px; }
 .setup .chip {
@@ -131,6 +131,9 @@
 .setup .setup-player-grid.solo .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 14px; }
 .setup .maths-setup label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
 .setup .maths-band { width: 100%; min-height: 46px; padding: 10px; border: 1px solid #48546b; border-radius: 6px; background: #1b263b; color: var(--ink); font: inherit; font-size: 12px; }
+.setup .maths-selector-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.setup .maths-preview-button { min-height: 44px; padding: 8px 12px; font-size: 12px; color: var(--player-accent); border-color: var(--player-accent); }
+.setup .maths-preview-button:disabled { border-color: #48546b; color: var(--muted); opacity: 0.6; cursor: default; }
 .setup .foot { margin: 8px 0 0; font-size: 12px; line-height: 1.5; }
 .setup .kits { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
 .setup .kit { width: 100%; height: 44px; min-width: 44px; border-radius: 5px; }
@@ -142,6 +145,11 @@
 .setup .setup-footer { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 28px; border-top: 1px solid #39455c; background: #162136; box-shadow: 0 -6px 18px rgba(8, 14, 27, 0.15); }
 .setup .setup-summary { min-width: 0; }
 .setup .setup-summary p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.setup .setup-summary .setup-maths-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.setup .setup-maths-status { min-height: 44px; padding: 6px 9px; border: 1px solid #48546b; border-radius: 5px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.setup .setup-maths-status:hover { border-color: var(--setup-teal); background: rgba(255, 255, 255, 0.04); }
+.setup .setup-maths-status.enabled { color: var(--setup-gold); }
+.setup .setup-maths-status.p2.enabled { color: var(--setup-teal); }
 .setup .warn { min-height: 0; color: #ffb5a6; font-size: 12px; line-height: 1.5; }
 .setup .warn:not(:empty) { margin-top: 4px; }
 .setup .setup-actions { display: flex; gap: 10px; flex-shrink: 0; }
@@ -152,7 +160,19 @@
 
 @media (min-width: 1060px) {
   .setup .setup-player-grid.solo .cards { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .setup .setup-player-grid.solo .maths-selector-row { grid-template-columns: minmax(0, 1fr) auto; }
 }
+
+/* Preview uses the real quiz surface without suggesting a live match or a
+   reward. Keep its navigation recognisable as a return to setup. */
+.overlay.maths-preview {
+  align-items: center;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background: linear-gradient(rgba(8, 14, 27, 0.88), rgba(8, 14, 27, 0.94)), url('../../public/assets/gorilla-football-3d-key-art.png') center / cover;
+}
+.maths-preview .mq-prize::before,
+.maths-preview .mq-pause-note::before { display: none; }
+.maths-preview .mq-skip { min-width: 132px; }
 @media (max-width: 860px) {
   .setup .setup-squads { grid-template-columns: minmax(0, 1fr); }
   .setup .setup-player-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

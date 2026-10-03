@@ -715,7 +715,7 @@ export class App {
           if (!suggestion) continue;
           const point = suggestion.playerId === null ? suggestion.point : view.getPlayer(suggestion.playerId).pos;
           const displayed = { ...suggestion, point: { ...point } };
-          const marker = this.renderer3d.drawSuggestion(hud, displayed, human === 0 ? dt : 0);
+          const marker = this.renderer3d.drawSuggestion(hud, displayed, human === 0 ? dt : 0, this.layout, human);
           if (marker) this.suggestionMarkers.push({ ...marker, human, suggestion: displayed });
         }
         for (const aim of aims) this.renderer3d.drawAim(hud, this.match, this.layout, { aim });

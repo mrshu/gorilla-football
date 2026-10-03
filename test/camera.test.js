@@ -87,45 +87,40 @@ test('a drag maps to a ground direction that points the same way on screen', () 
   }
 });
 
-test('the broadcast camera stands in the side stand looking across the pitch', () => {
+test('the action camera looks across nearby play rather than along the pitch', () => {
   for (const attackDir of [1, -1]) {
     const c = cam();
     frameSideline(c, { x: 52, y: 34 }, attackDir, true);
-    assert.ok(c.eye.y < 0, 'camera should be outside one touchline');
-    assert.ok(c.eye.z > 10, 'camera should be raised into the stand');
-    assert.ok(c.target.y > 0, 'camera should look across the pitch');
+    assert.ok(c.eye.y < c.target.y, 'camera should look across the action from its side');
+    assert.ok(c.eye.z > 6, 'camera should remain high enough to read nearby play');
     // Looking across the width, not along the length.
     const dir = { x: c.target.x - c.eye.x, y: c.target.y - c.eye.y };
     assert.ok(Math.abs(dir.y) > Math.abs(dir.x), 'the view should run across the pitch');
   }
 });
 
-test('the pitch runs across the screen, not away from the camera', () => {
+test('nearby runs up the pitch stay horizontal and readable', () => {
   const c = cam(932, 430);
   frameSideline(c, { x: 52, y: 34 }, 1, false);
-  const left = c.project({ x: 10, y: 34, z: 0 });
-  const right = c.project({ x: 95, y: 34, z: 0 });
+  const left = c.project({ x: 47, y: 34, z: 0 });
+  const right = c.project({ x: 57, y: 34, z: 0 });
   assert.ok(left.visible && right.visible);
-  // Both ends of the pitch are on screen and separated horizontally.
-  assert.ok(Math.abs(right.x - left.x) > 400, 'the length should span the screen');
+  assert.ok(Math.abs(right.x - left.x) > 150, 'nearby play should have a useful on-screen footprint');
   assert.ok(Math.abs(right.y - left.y) < 120, 'the length should run roughly level');
 });
 
-test('the far touchline sits near the top and grass fills the frame', () => {
+test('the action ball clears the top HUD and bottom touch controls', () => {
   for (const [w, h, portrait] of [[932, 430, false], [430, 932, true]]) {
     const c = cam(w, h);
     frameSideline(c, { x: 52, y: 34 }, 1, portrait);
-    const far = c.project({ x: 52, y: PITCH.width, z: 0 });
-    assert.ok(far.visible, `${w}x${h}: far touchline should be in shot`);
-    assert.ok(far.y > 0 && far.y < h * 0.3, `${w}x${h}: far touchline at ${(far.y / h).toFixed(2)} of the screen`);
-    // Everything below it, down the middle of the picture, is pitch.
-    const mid = c.screenToGround(w / 2, h * 0.75);
-    assert.ok(mid, `${w}x${h}: the lower frame should be grass`);
-    assert.ok(mid.y > -12 && mid.y < PITCH.width, `${w}x${h}: lower frame is off the pitch at y=${mid.y.toFixed(1)}`);
+    const ball = c.project({ x: 52, y: 34, z: 0.22 });
+    assert.ok(ball.visible);
+    assert.ok(ball.y > 130 && ball.y < h - 100, `${w}x${h}: ball must clear the HUD and controls`);
+    assert.ok(ball.x > w * 0.3 && ball.x < w * 0.7);
   }
 });
 
-test('the broadcast camera keeps the ball on screen from anywhere on the pitch', () => {
+test('the action camera keeps the ball comfortably framed at every pitch position', () => {
   const sizes = [[400, 800, true], [430, 932, true], [932, 430, false], [844, 390, false]];
   for (const [w, h, portrait] of sizes) {
     for (const attackDir of [1, -1]) {
@@ -135,20 +130,25 @@ test('the broadcast camera keeps the ball on screen from anywhere on the pitch',
           frameSideline(c, { x, y }, attackDir, portrait);
           const p = c.project({ x, y, z: 0 });
           assert.ok(p.visible, `${w}x${h}: ball at ${x},${y} dir ${attackDir} is behind the camera`);
-          assert.ok(p.x >= 0 && p.x <= w, `${w}x${h}: ball at ${x},${y} off screen (x=${p.x.toFixed(0)})`);
-          assert.ok(p.y >= 0 && p.y <= h, `${w}x${h}: ball at ${x},${y} off screen (y=${p.y.toFixed(0)})`);
+          assert.ok(p.x >= w * 0.2 && p.x <= w * 0.8, `${w}x${h}: ball at ${x},${y} too close to an edge (x=${p.x.toFixed(0)})`);
+          assert.ok(p.y >= h * 0.3 && p.y <= h * 0.7, `${w}x${h}: ball at ${x},${y} too close to an edge (y=${p.y.toFixed(0)})`);
         }
       }
     }
   }
 });
 
-test('both goals are in view from the halfway line', () => {
-  const c = cam(932, 430);
-  frameSideline(c, { x: PITCH.length / 2, y: PITCH.width / 2 }, 1, false);
-  for (const x of [0, PITCH.length]) {
-    const g = c.project({ x, y: PITCH.width / 2, z: 0 });
-    assert.ok(g.visible, `goal at x=${x} should be in view`);
+test('player bodies remain readable and nearby opponents remain visible on phones', () => {
+  for (const [w, h] of [[320, 568], [360, 800], [390, 844], [430, 932], [844, 390], [1280, 720]]) {
+    const c = cam(w, h);
+    frameSideline(c, { x: 52, y: 34 }, 1, h > w);
+    for (const x of [47, 52, 57]) {
+      const feet = c.project({ x, y: 34, z: 0 });
+      const head = c.project({ x, y: 34, z: 1.85 });
+      assert.ok(feet.visible && head.visible);
+      assert.ok(head.x > 0 && head.x < w && feet.x > 0 && feet.x < w, 'nearby player must remain visible');
+      assert.ok(feet.y - head.y >= 30, `${w}x${h}: a standing player needs at least 30px to read, got ${feet.y - head.y}`);
+    }
   }
 });
 
@@ -267,14 +267,15 @@ test('blending between camera poses moves smoothly from one to the other', () =>
   assert.ok(mid.fov > Math.min(wide.fov, close.fov) - 0.01 && mid.fov < Math.max(wide.fov, close.fov) + 0.01);
 });
 
-test('the broadcast camera never wanders onto the pitch', () => {
+test('action framing follows a long carry without letting the player shrink away', () => {
   for (const portrait of [false, true]) {
     for (let y = 0; y <= PITCH.width; y += 2) {
       for (const x of [0, 52, PITCH.length]) {
         const c = cam(portrait ? 430 : 1280, portrait ? 932 : 720);
         frameSideline(c, { x, y }, 1, portrait);
-        assert.ok(c.eye.y < -2, `camera stepped onto the pitch at ball y=${y}: eye.y=${c.eye.y.toFixed(1)}`);
-        assert.ok(c.eye.z > 10, 'camera should stay up in the stand');
+        const feet = c.project({ x, y, z: 0 });
+        const head = c.project({ x, y, z: 1.85 });
+        assert.ok(feet.y - head.y >= 50, 'the carrier must stay readable through the entire carry');
       }
     }
   }

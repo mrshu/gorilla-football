@@ -82,6 +82,20 @@ test('HUD identifies carrier and then defender, and displays possession notifica
   assert.ok(canvas.texts.some((text) => text.startsWith('P1 · #')));
 });
 
+test('match badges show the maths preference independently for each player', () => {
+  const match = new Match(normalizeConfig({ mode: 'coop', humans: [
+    { characterId: 'gorilla', mathsBand: 0 },
+    { characterId: 'wizard', mathsBand: 5 },
+  ] }));
+  const layout = computeAimLayout(390, 844, 2, 1);
+  const canvas = textCanvas();
+  drawHud(canvas, match, layout);
+  const off = canvas.labels.find((label) => label.text === 'Maths off');
+  const on = canvas.labels.find((label) => label.text.startsWith('Maths on'));
+  assert.ok(off && on, 'both enabled and disabled preferences remain visible');
+  assert.ok(off.x < on.x, 'the P2 setting is shown in the P2 badge');
+});
+
 test('phone and versus HUDs keep long labels on screen without changing touch targets', () => {
   for (const mode of ['solo', 'versus']) {
     const match = new Match(normalizeConfig({ mode }));

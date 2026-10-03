@@ -105,12 +105,20 @@ through a different player.
 Carrier labels and possession notices show who you are playing through; taps
 also mark accepted run and press targets. Specials are available in open play.
 
-The camera is a **side view** by default, high in the side stand, the way
-football is televised. Carry the ball inside thirty metres of goal and it eases
-in behind you, low and facing the goal, to line up the shot. A yellow tick marks
+The camera is a **close side view** by default, following the ball and nearby
+players rather than fitting the whole pitch. Carry the ball inside thirty
+metres of goal and it eases in behind you, low and facing the goal, to line up
+the shot. A yellow tick marks
 where the game reckons the ball should go next; it reads the same pass ranking
 the AI plays by. First person, looking out from your own player, is a setting on
-the pre-match screen.
+the pre-match screen. Targets outside the view have an edge tick you can still
+tap to play the suggested pass or shot.
+
+Players use the selected character's idle and running artwork, recoloured for
+their team kit. Species-specific shapes provide a fallback while artwork loads.
+The runtime uses resized cutouts in `public/assets/players`, loaded per species
+on the pitch. Regenerate them from the original artwork with
+`node scripts/build-player-sprites.mjs` on macOS; checked-in assets need no build.
 
 Human free kicks and penalties use the taker's first-person view during
 staging, aiming and ball flight. Drawing holds that view steady; the configured
@@ -177,6 +185,9 @@ Optional maths practice is selected per player in setup. Choose a starting age
 (5 to 16+) or leave it off for ordinary football. The question engine is ported
 from `football-puck-chaos` as a self-contained ES module: all eleven bands,
 adaptive difficulty, mastery, plausible choices and proportional diagrams.
+The setup summary and match badges show whether practice is enabled. Use
+**Preview question** beside the age selector to try the actual question screen
+before kickoff; preview answers do not change saved learning or earn a reward.
 
 The first eligible attacking possession offers a question, then roughly every
 third one; kickoff introduces the mode. Play pauses with no countdown. Skip
@@ -338,11 +349,11 @@ asked about:
   grass, and its eye, target and field of view are mirrored into the three.js
   camera. That keeps the tested maths in one place and guarantees the line you
   draw lands where the rendered pitch actually is.
-- **The camera runs on rails down the pitch.** It tracks the ball sideways only
-  partially and its axis stays nearly parallel to the touchlines, so the pitch
-  does not swing about as the ball moves. The parameters were picked by a search
-  that required the ball to stay on screen from every point on the pitch at four
-  screen sizes; `test/camera.test.js` checks that it still does.
+- **The action camera follows nearby play.** Its fixed side angle keeps the
+  pitch orientation steady while a fast, smooth follow keeps passes in view.
+  Portrait and landscape framing keep players readable and the ball clear of
+  controls across the pitch; `test/camera.test.js` covers framing, player size,
+  fast-ball tracking and the captured projection used during a kick gesture.
 - **You draw the pass, you do not aim it.** The whole stroke is captured,
   projected onto the grass and followed by the ball, so a curled ball round a
   defender is something you draw rather than something the game does for you.

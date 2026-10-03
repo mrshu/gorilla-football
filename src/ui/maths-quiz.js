@@ -1,6 +1,17 @@
 // Maths quiz tokens and proportional geometry ported from football-puck-chaos.
 // Questions are read-only; this view only reports answers and navigation.
 
+import Maths from '../game/maths.js';
+
+// Preview uses a fresh state and independent random source. It never reads
+// saved learner profiles, updates mastery, or touches match randomness.
+export function createMathsPreview(band, rand = Math.random) {
+  if (!Number.isInteger(band) || band < 1 || band > Maths.MAX_BAND) {
+    throw new RangeError('Select a starting age before previewing a question');
+  }
+  return Maths.make(band, Maths.newState(band), rand);
+}
+
 // Screen-reader equivalents also document every Maths.make token shape.
 export function mathsTokenLabel(t) {
   switch (t.t) {
@@ -304,7 +315,7 @@ const element = (tag, className, text) => {
 // onAnswer reports learning/reward immediately. The game remains paused
 // until onContinue, allowing the player to read the answer at their pace.
 export function showMathsQuiz(root, question, {
-  humanIndex = 0, flip = false, onAnswer, onSkip, onContinue,
+  humanIndex = 0, flip = false, preview = false, previewLabel = '', onAnswer, onSkip, onContinue,
 } = {}) {
   const previousFocus = document.activeElement;
   const id = `maths-quiz-${++quizSequence}`;
@@ -317,7 +328,7 @@ export function showMathsQuiz(root, question, {
     listeners.push(() => node.removeEventListener(type, listener));
   };
 
-  root.className = `overlay maths-quiz${flip ? ' maths-quiz-flip' : ''}`;
+  root.className = `overlay maths-quiz${flip ? ' maths-quiz-flip' : ''}${preview ? ' maths-preview' : ''}`;
   const panel = element('section', `mq-panel mq-p${humanIndex + 1}`);
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
@@ -327,13 +338,15 @@ export function showMathsQuiz(root, question, {
   const player = element('span', 'mq-player', `P${humanIndex + 1}`);
   player.id = `${id}-player`;
   player.setAttribute('aria-label', `Player ${humanIndex + 1}`);
-  const heading = element('h2', 'mq-heading', 'Maths break');
+  const heading = element('h2', 'mq-heading', preview ? 'Question preview' : 'Maths break');
   heading.id = `${id}-title`;
   panel.setAttribute('aria-labelledby', `${id}-player ${id}-title`);
   const identity = element('div', 'mq-identity');
   identity.append(player, heading);
-  header.append(identity, element('span', 'mq-prize', 'Focused kick'));
-  const lead = element('p', 'mq-lead', 'Get it right for a more accurate next kick.');
+  header.append(identity, element('span', 'mq-prize', preview ? (previewLabel || 'Preview') : 'Focused kick'));
+  const lead = element('p', 'mq-lead', preview
+    ? 'Try a sample question. Preview answers do not change your practice progress.'
+    : 'Get it right for a more accurate next kick.');
   lead.id = `${id}-lead`;
   const prompt = element('div', 'mq-question');
   prompt.setAttribute('role', 'math');
@@ -348,8 +361,8 @@ export function showMathsQuiz(root, question, {
   feedback.setAttribute('role', 'status');
   feedback.setAttribute('aria-live', 'polite');
   const footer = element('div', 'mq-footer');
-  const pauseNote = element('span', 'mq-pause-note', 'Match paused');
-  const skip = element('button', 'mq-skip', 'Skip · keep playing');
+  const pauseNote = element('span', 'mq-pause-note', preview ? 'Preview only' : 'Match paused');
+  const skip = element('button', 'mq-skip', preview ? 'Back to setup' : 'Skip · keep playing');
   skip.type = 'button';
   const proceed = element('button', 'mq-continue', 'Continue');
   proceed.type = 'button';
@@ -369,9 +382,10 @@ export function showMathsQuiz(root, question, {
   }
 
   function skipQuestion() {
-    if (!active || answered) return;
+    if (!active || (answered && !preview)) return;
     cleanup();
-    onSkip?.();
+    if (answered) onContinue?.();
+    else onSkip?.();
   }
 
   const answerButtons = question.choices.map((value) => {
@@ -387,16 +401,16 @@ export function showMathsQuiz(root, question, {
         if (otherValue === question.answer) other.classList.add('mq-correct');
       });
       if (!correct) button.classList.add('mq-wrong');
-      feedback.textContent = correct
-        ? 'Correct! Focused kick earned for your next pass or shot.'
-        : `The correct answer is ${question.answer}. Keep playing and try the next one.`;
+      feedback.textContent = preview
+        ? (correct ? 'Correct! Your practice progress is unchanged.' : `The correct answer is ${question.answer}. Your practice progress is unchanged.`)
+        : (correct ? 'Correct! Focused kick earned for your next pass or shot.' : `The correct answer is ${question.answer}. Keep playing and try the next one.`);
       feedback.classList.toggle('mq-success', correct);
       panel.classList.add('mq-answered');
       pauseNote.hidden = true;
       skip.hidden = true;
       proceed.hidden = false;
-      proceed.textContent = correct ? 'Continue · Focused kick ready' : 'Continue';
-      onAnswer?.(correct, elapsedMs);
+      proceed.textContent = preview ? 'Back to setup' : (correct ? 'Continue · Focused kick ready' : 'Continue');
+      if (!preview) onAnswer?.(correct, elapsedMs);
       if (active) proceed.focus();
     });
     choices.append(button);

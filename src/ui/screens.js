@@ -5,9 +5,21 @@
 import { CHARACTERS, STAT_KEYS, getCharacter } from '../data/characters.js';
 import { TEAM_PRESETS } from '../data/teams.js';
 import { JERSEYS, jerseysDistinct } from '../data/jerseys.js';
-import { MODES, MODE_INFO, CONTROL, CONTROL_INFO, VIEW_INFO, DURATION_OPTIONS, humanCount, humanTeamIndex } from '../game/config.js';
+import { MODES, MODE_INFO, CONTROL, CONTROL_INFO, VIEW, VIEW_INFO, DURATION_OPTIONS, humanCount, humanTeamIndex } from '../game/config.js';
 import { getAbility } from '../game/abilities.js';
 import { computeDecisionLayout } from './decision-layout.js';
+import { createMathsPreview, showMathsQuiz } from './maths-quiz.js';
+
+const MATHS_OPTIONS = [
+  'Off — just football', 'Age 5 · counting', 'Age 6 · addition',
+  'Age 7 · numbers to 20', 'Age 8 · multiplication', 'Age 9 · fractions',
+  'Age 10 · decimals', 'Age 11 · percentages', 'Age 12 · equations',
+  'Age 13 · algebra', 'Ages 14–15 · geometry', 'Age 16+ · advanced maths',
+];
+
+export function mathsStartingAgeLabel(band) {
+  return band > 0 && MATHS_OPTIONS[band] ? MATHS_OPTIONS[band].split(' · ')[0] : 'Off';
+}
 
 const el = (tag, cls, html) => {
   const e = document.createElement(tag);
@@ -138,8 +150,8 @@ export function showSetup(root, initial, { onStart, onBack }) {
       playerHeader.append(el('h3', null, `Player ${i + 1}`));
       playerHeader.append(el('span', 'setup-player-team', `Team ${humanTeamIndex(state.mode, i) + 1}`));
       player.append(playerHeader);
-      player.append(section('Character', charRow(i), 'setup-field player-character', 'h4'));
       player.append(section('Maths practice', mathsRow(i), 'setup-field player-maths', 'h4'));
+      player.append(section('Character', charRow(i), 'setup-field player-character', 'h4'));
       playerGrid.append(player);
     }
     players.append(playerGrid);
@@ -157,6 +169,22 @@ export function showSetup(root, initial, { onStart, onBack }) {
     const summary = el('div', 'setup-summary');
     const controls = CONTROL_INFO.find((c) => c.id === state.control) || CONTROL_INFO[0];
     summary.append(el('p', null, `${n === 1 ? '1 player' : '2 players'} · ${controls.name} · ${state.durationMinutes} min`));
+    const mathsSummary = el('p', 'setup-maths-summary');
+    mathsSummary.setAttribute('aria-live', 'polite');
+    mathsSummary.append(document.createTextNode('Maths: '));
+    for (let i = 0; i < n; i++) {
+      const status = el('button', `setup-maths-status p${i + 1}${state.humans[i].mathsBand ? ' enabled' : ''}`);
+      status.type = 'button';
+      status.textContent = `P${i + 1} ${mathsStartingAgeLabel(state.humans[i].mathsBand)}`;
+      status.setAttribute('aria-label', `Player ${i + 1} maths ${mathsStartingAgeLabel(state.humans[i].mathsBand)}. Choose starting age`);
+      status.onclick = () => {
+        const age = root.querySelector(`#maths-band-${i + 1}`);
+        age.focus({ preventScroll: true });
+        age.scrollIntoView({ block: 'center' });
+      };
+      mathsSummary.append(status);
+    }
+    summary.append(mathsSummary);
     const warn = el('div', 'warn');
     warn.id = 'setup-warning';
     warn.setAttribute('role', 'status');
@@ -220,7 +248,7 @@ export function showSetup(root, initial, { onStart, onBack }) {
       card.dataset.setupFocus = `character-${i}-${c.id}`;
       const avatar = el('div', 'avatar');
       const portrait = document.createElement('img');
-      portrait.src = `public/assets/player-sprite-${c.id}.png`;
+      portrait.src = `public/assets/players/${c.look.shape}-idle.png`;
       portrait.alt = '';
       portrait.decoding = 'async';
       avatar.append(portrait);
@@ -250,23 +278,52 @@ export function showSetup(root, initial, { onStart, onBack }) {
     const select = el('select', 'maths-band');
     select.id = label.htmlFor;
     select.setAttribute('aria-label', `Player ${i + 1} maths starting age`);
-    const options = [
-      'Off — just football', 'Age 5 · counting', 'Age 6 · addition',
-      'Age 7 · numbers to 20', 'Age 8 · multiplication', 'Age 9 · fractions',
-      'Age 10 · decimals', 'Age 11 · percentages', 'Age 12 · equations',
-      'Age 13 · algebra', 'Ages 14–15 · geometry', 'Age 16+ · advanced maths',
-    ];
-    options.forEach((name, band) => {
+    select.dataset.setupFocus = `maths-age-${i}`;
+    MATHS_OPTIONS.forEach((name, band) => {
       const option = el('option');
       option.value = String(band);
       option.textContent = name;
       select.append(option);
     });
     select.value = String(state.humans[i].mathsBand || 0);
-    select.onchange = () => { state.humans[i].mathsBand = Number(select.value); };
+    select.onchange = () => {
+      state.humans[i].mathsBand = Number(select.value);
+      render();
+    };
+    const selectorRow = el('div', 'maths-selector-row');
+    const preview = el('button', 'btn ghost maths-preview-button', 'Preview question');
+    preview.type = 'button';
+    preview.dataset.setupFocus = `maths-preview-${i}`;
+    preview.disabled = !state.humans[i].mathsBand;
+    preview.setAttribute('aria-label', `Preview question for Player ${i + 1}`);
+    preview.onclick = () => {
+      const band = state.humans[i].mathsBand;
+      if (!band) return;
+      const question = createMathsPreview(band);
+      const setupPanel = root.firstElementChild;
+      const content = setupPanel.querySelector('.setup-content');
+      const scrollTop = content.scrollTop;
+      const returnToSetup = () => {
+        root.className = 'overlay setup';
+        root.replaceChildren(setupPanel);
+        root.hidden = false;
+        content.scrollTop = scrollTop;
+        preview.focus({ preventScroll: true });
+      };
+      showMathsQuiz(root, question, {
+        humanIndex: i, preview: true, previewLabel: mathsStartingAgeLabel(band),
+        onSkip: returnToSetup, onContinue: returnToSetup,
+      });
+    };
     const hint = el('p', 'foot');
-    hint.textContent = 'Occasional, skippable questions earn a more accurate kick. Difficulty adapts to each player and progress stays on this device.';
-    wrap.append(label, select, hint);
+    hint.id = `maths-hint-${i}`;
+    hint.textContent = state.humans[i].mathsBand
+      ? 'Skippable match questions earn a more accurate kick. Difficulty adapts; progress stays on this device.'
+      : 'Choose a starting age to enable maths and preview a question. Off keeps this player’s match football-only.';
+    select.setAttribute('aria-describedby', hint.id);
+    preview.setAttribute('aria-describedby', hint.id);
+    selectorRow.append(select, preview);
+    wrap.append(label, selectorRow, hint);
     return wrap;
   }
 
@@ -357,7 +414,7 @@ export function showSetup(root, initial, { onStart, onBack }) {
     }
     wrap.append(row);
     const info = VIEW_INFO.find((v) => v.id === state.view) || VIEW_INFO[0];
-    wrap.append(el('p', 'foot', info.detail));
+    wrap.append(el('p', 'foot', info.id === VIEW.BROADCAST ? 'A close camera follows the ball from the side of the pitch.' : info.detail));
     return wrap;
   }
 

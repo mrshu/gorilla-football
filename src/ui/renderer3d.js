@@ -5,7 +5,7 @@
 
 import { PITCH, STATES } from '../game/constants.js';
 import { clamp } from '../game/vec.js';
-import { Camera, frameSideline, frameFirstPerson, sidelinePose, shootingPose, isInShootingRange, applyPose, blendPose } from './camera.js';
+import { Camera, frameSideline, frameFirstPerson, sidelinePose, shootingPose, isInShootingRange, applyPose, blendPose, keepBallInFrame } from './camera.js';
 
 const SKY_TOP = '#101429';
 const SKY_HORIZON = '#2b3158';
@@ -19,6 +19,40 @@ const CROWD = ['#f5f4e9', '#8b85d9', '#ff6b5f', '#ffd35c', '#63e5ff', '#b6f36b',
 function hash2(a, b) {
   const n = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
   return n - Math.floor(n);
+}
+
+// The tick accepts the same world action even when its receiver or goal is
+// outside the close camera. Keep its touch target inside its owner's zone.
+export function suggestionMarker(camera, suggestion, layout = null, human = 0) {
+  const point = { ...suggestion.point, z: 1.4 };
+  const screen = camera.project(point);
+  const { w, h } = layout || camera.viewport;
+  const zone = layout?.zones?.[human] || { x: 0, y: 44, w, h: h - 44 };
+  const hudBottom = layout?.hud ? layout.hud.y + layout.hud.h : 44;
+  const left = zone.x + 36;
+  const right = Math.max(left, zone.x + zone.w - 36);
+  const bottom = zone.y + zone.h - (zone.y + zone.h >= h - 1 ? 142 : 110);
+  const top = Math.min(bottom, Math.max(zone.y + 36, hudBottom + 24 + 60 + 29 + 36));
+  const cx = (left + right) / 2;
+  const cy = (top + bottom) / 2;
+  const clipped = !screen.visible || screen.x < left || screen.x > right || screen.y < top || screen.y > bottom;
+  if (!clipped) return { ...screen, clipped: false, direction: null };
+  let dx;
+  let dy;
+  if (screen.visible) {
+    dx = screen.x - cx;
+    dy = screen.y - cy;
+  } else {
+    const v = { x: point.x - camera.eye.x, y: point.y - camera.eye.y, z: point.z - camera.eye.z };
+    const { r, u } = camera.basis;
+    dx = v.x * r.x + v.y * r.y + v.z * r.z;
+    dy = -(v.x * u.x + v.y * u.y + v.z * u.z);
+  }
+  const length = Math.hypot(dx, dy);
+  const direction = length > 1e-6 ? { x: dx / length, y: dy / length } : { x: 0, y: 1 };
+  const reach = Math.min(direction.x ? (right - left) / 2 / Math.abs(direction.x) : Infinity,
+    direction.y ? (bottom - top) / 2 / Math.abs(direction.y) : Infinity);
+  return { ...screen, x: cx + direction.x * reach, y: cy + direction.y * reach, clipped: true, direction };
 }
 
 export class Renderer3D {
@@ -38,38 +72,61 @@ export class Renderer3D {
   // Smoothly follow the ball so the camera never snaps.
   updateCamera(match, layout, dt) {
     if (layout.aiming) return;
+    const returning = !layout.shooter && (this.shotBlend > 0.01 || this.returningShot);
+    const previousFrame = this.pose && returning && dt < 0.9
+      && this.camera.viewport.w === layout.w && this.camera.viewport.h === layout.h
+      ? this.camera.ballFrame || this.camera.project({ ...match.ball.pos, z: Math.max(0.22, (match.ball.z || 0) + 0.22) }) : null;
     const target = match.ball.pos;
     if (!this.smoothBall) this.smoothBall = { ...target };
-    const k = 1 - Math.exp(-6 * Math.max(0, Math.min(dt, 0.1)));
+    const k = 1 - Math.exp(-18 * Math.max(0, Math.min(dt, 0.1)));
     this.smoothBall.x += (target.x - this.smoothBall.x) * k;
     this.smoothBall.y += (target.y - this.smoothBall.y) * k;
     this.camera.setViewport(layout.w, layout.h);
     if (layout.firstPerson && layout.eyePlayer) {
+      if (!this.wasFirstPerson || this.eyePlayerId !== layout.eyePlayer.id) {
+        this.smoothedLook = { ...layout.lookAt };
+      }
+      this.wasFirstPerson = true;
+      this.eyePlayerId = layout.eyePlayer.id;
+      this.camera.ballFrame = null;
       frameFirstPerson(this.camera, layout.eyePlayer, this.smoothLook(layout, dt), layout.portrait);
       this.applySmoothedPose(cameraPose(this.camera), dt);
+      // Once a kick is released, track its real airborne height and keep it
+      // visible by turning the head, without moving the first-person eye.
+      if (match.state === STATES.PLAY && match.ball.owner == null) {
+        this.pose = keepBallInFrame(this.camera, this.pose, match.ball, layout);
+      }
       this.shotBlend = 0;
+      this.returningShot = false;
       return;
     }
+    this.wasFirstPerson = false;
     // Drop in behind the player on the ball once they are in range of goal,
     // easing between the two so it reads as a camera move, not a cut.
     const shooter = layout.shooter;
     const want = shooter ? 1 : 0;
-    const rate = 1 - Math.exp(-1.8 * Math.max(0, Math.min(dt, 0.2)));
+    const rate = 1 - Math.exp(-(shooter ? 1.8 : 12) * Math.max(0, Math.min(dt, 0.2)));
     this.shotBlend = (this.shotBlend || 0) + (want - (this.shotBlend || 0)) * rate;
     const wide = sidelinePose(this.smoothBall, layout.viewAttackDir, layout.portrait);
     if (this.shotBlend < 0.01 || !layout.shotAnchor) {
-      this.applySmoothedPose(wide, dt);
+      // Close action framing cannot lag a fast pass by half the pitch.
+      this.applySmoothedPose(wide, dt, returning ? 6 : 18);
+      this.pose = keepBallInFrame(this.camera, this.pose, match.ball, layout, previousFrame, dt);
+      this.returningShot = Boolean(returning && Math.hypot(this.pose.eye.x - wide.eye.x,
+        this.pose.eye.y - wide.eye.y, this.pose.eye.z - wide.eye.z) > 3);
       return;
     }
     const close = shootingPose(layout.shotAnchor.carrier, layout.shotAnchor.goal, layout.portrait);
-    this.applySmoothedPose(blendPose(wide, close, this.shotBlend), dt);
+    this.applySmoothedPose(blendPose(wide, close, this.shotBlend), dt, shooter ? 1.65 : 6);
+    this.pose = keepBallInFrame(this.camera, this.pose, match.ball, layout, previousFrame, dt);
+    this.returningShot = !shooter;
   }
 
-  applySmoothedPose(target, dt) {
+  applySmoothedPose(target, dt, rate = 1.65) {
     if (!this.pose || dt >= 0.9) {
       this.pose = target;
     } else {
-      const amount = 1 - Math.exp(-1.65 * Math.max(0, Math.min(dt, 0.2)));
+      const amount = 1 - Math.exp(-rate * Math.max(0, Math.min(dt, 0.2)));
       this.pose = blendPose(this.pose, target, amount);
     }
     applyPose(this.camera, this.pose);
@@ -92,6 +149,9 @@ export class Renderer3D {
     this.smoothBall = { ...match.ball.pos };
     this.smoothedLook = layout && layout.lookAt ? { ...layout.lookAt } : null;
     this.pose = null;
+    this.returningShot = false;
+    this.camera.ballFrame = null;
+    this.wasFirstPerson = false;
     if (layout) this.updateCamera(match, layout, 1);
   }
 
@@ -684,13 +744,12 @@ export class Renderer3D {
     ctx.restore();
   }
 
-  drawSuggestion(ctx, suggestion, dt) {
+  drawSuggestion(ctx, suggestion, dt, layout = null, human = 0) {
     if (!suggestion) return;
-    const s = this.camera.project({ x: suggestion.point.x, y: suggestion.point.y, z: 1.4 });
-    if (!s.visible) return;
+    const s = suggestionMarker(this.camera, suggestion, layout, human);
     this.suggestPulse = (this.suggestPulse || 0) + (dt || 0);
     const pulse = 1 + Math.sin(this.suggestPulse * 4) * 0.08;
-    const r = Math.max(6, Math.min(14, s.scale * 0.4)) * pulse;
+    const r = (s.clipped ? 11 : Math.max(6, Math.min(14, s.scale * 0.4))) * pulse;
     ctx.save();
     ctx.globalAlpha = 0.65;
     // Soft glow, then the disc.
@@ -718,8 +777,25 @@ export class Renderer3D {
     ctx.lineTo(s.x - r * 0.1, s.y + r * 0.34);
     ctx.lineTo(s.x + r * 0.45, s.y - r * 0.36);
     ctx.stroke();
+    if (s.clipped) {
+      const d = s.direction;
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = suggestion.kind === 'shot' ? '#ff8a3d' : '#ffe33d';
+      ctx.beginPath();
+      ctx.moveTo(s.x + d.x * (r + 15), s.y + d.y * (r + 15));
+      ctx.lineTo(s.x + d.x * (r + 5) - d.y * 4, s.y + d.y * (r + 5) + d.x * 4);
+      ctx.lineTo(s.x + d.x * (r + 5) + d.y * 4, s.y + d.y * (r + 5) - d.x * 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(12,18,30,0.88)';
+      ctx.fillRect(s.x - 28, s.y + 24, 56, 17);
+      ctx.fillStyle = '#fff4c5';
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(suggestion.kind === 'shot' ? 'SHOOT' : 'PASS', s.x, s.y + 36);
+    }
     ctx.restore();
-    return { x: s.x, y: s.y, radius: Math.max(24, r * 1.9) };
+    return { x: s.x, y: s.y, radius: Math.max(24, r * 1.9), clipped: s.clipped, direction: s.direction };
   }
 
   drawFloats(ctx, layout, dt) {

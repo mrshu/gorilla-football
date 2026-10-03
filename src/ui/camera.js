@@ -34,6 +34,7 @@ export class Camera {
   }
 
   setViewport(w, h) {
+    if (w !== this.viewport.w || h !== this.viewport.h) this.ballFrame = null;
     this.viewport = { w, h };
     this.recompute();
   }
@@ -134,25 +135,19 @@ export class Camera {
   }
 }
 
-// The broadcast camera: up in the stand on one touchline, looking across the
-// pitch, panning along the halfway line as play moves. The pitch length runs
-// across the screen, which is how football is filmed and how you can read
-// both penalty areas at once.
+// The action camera looks across nearby play from the ball's side. Follow
+// its full position instead of fitting the entire pitch into a distant view;
+// the player on the ball and nearby opponents must remain readable on phones.
 export function frameSideline(camera, ballPos, attackDir, portrait) {
   return applyPose(camera, sidelinePose(ballPos, attackDir, portrait));
 }
 
 export function sidelinePose(ballPos, attackDir, portrait) {
   const v = portrait ? SIDE.portrait : SIDE.landscape;
-  const cx = PITCH.length / 2;
-  const cy = PITCH.width / 2;
-  // Pan only part of the way with the ball so the pitch does not slide about,
-  // and drift a little across the width so play on the near touchline does
-  // not fall off the bottom of a frame that is deliberately cropped there.
-  const bx = cx + (ballPos.x - cx) * v.track;
-  const dy = (ballPos.y - cy) * v.trackY;
-  const eye = { x: bx, y: -v.distance + dy, z: v.height };
-  const target = { x: bx + attackDir * v.lead, y: PITCH.width * v.aimAcross + dy, z: 0 };
+  const eye = { x: ballPos.x, y: ballPos.y - v.distance, z: v.height };
+  // Aim just above the ball so it sits a little below centre, clear of the
+  // scoreboard and bottom-corner touch buttons in either orientation.
+  const target = { x: ballPos.x, y: ballPos.y, z: 0.4 };
   return { eye, target, fov: v.fov };
 }
 
@@ -191,6 +186,53 @@ export function applyPose(camera, pose) {
   return camera;
 }
 
+// A returning shot camera can still be looking at goal while its eye sweeps
+// toward the side of a fast pass. Correct only an unsafe look direction;
+// retain the smoothly moving eye and leave first-person framing to its caller.
+export function keepBallInFrame(camera, pose, ball, layout, previousFrame = null, dt = 0) {
+  if (dt >= 0.9) previousFrame = null;
+  const point = { ...ball.pos, z: Math.max(0.22, (ball.z || 0) + 0.22) };
+  const minY = Math.min(160, layout.h * 0.48);
+  // First-person feet start low in frame. Leave the released ball there
+  // until it rises, rather than snapping it upward at the kick itself.
+  const maxY = layout.firstPerson ? Math.max(minY, layout.h - 100) : layout.h * 0.7;
+  const screen = camera.project(point);
+  // While returning from behind the shooter, keep following the ball's
+  // existing composition and ease it to the action view's centre. Turning
+  // straight toward the sideline target can sweep a released pass away.
+  const amount = 1 - Math.exp(-6 * Math.max(0, Math.min(dt, 0.1)));
+  const wanted = previousFrame?.visible ? {
+    x: previousFrame.x + (layout.w / 2 - previousFrame.x) * amount,
+    y: previousFrame.y + (layout.h * 0.52 - previousFrame.y) * amount,
+  } : screen;
+  const x = wanted.visible === false ? layout.w / 2 : clampNum(wanted.x, layout.w * 0.2, layout.w * 0.8);
+  const y = wanted.visible === false ? layout.h / 2 : clampNum(wanted.y, minY, maxY);
+  if (screen.visible && x === screen.x && y === screen.y) {
+    camera.ballFrame = screen;
+    return pose;
+  }
+  // Solve the smallest yaw/pitch correction that puts the ball exactly on
+  // the safe boundary. Unlike iterative target nudges, this is continuous
+  // when the ball crosses an edge and introduces no overshoot or target snap.
+  const kx = (2 * x / layout.w - 1) * camera.aspect / camera.focal;
+  const ky = (1 - 2 * y / layout.h) / camera.focal;
+  const toBall = sub3(point, pose.eye);
+  const distance = Math.hypot(toBall.x, toBall.y, toBall.z) || 1;
+  const elevation = toBall.z / distance;
+  const pitch = Math.asin(clampNum(elevation * Math.sqrt(1 + kx * kx + ky * ky)
+    / Math.sqrt(1 + ky * ky), -1, 1)) - Math.atan(ky);
+  const yaw = Math.atan2(toBall.y, toBall.x) + Math.atan2(kx, Math.cos(pitch) - ky * Math.sin(pitch));
+  const reach = Math.hypot(pose.target.x - pose.eye.x, pose.target.y - pose.eye.y, pose.target.z - pose.eye.z) || 1;
+  const adjusted = { ...pose, target: {
+    x: pose.eye.x + Math.cos(pitch) * Math.cos(yaw) * reach,
+    y: pose.eye.y + Math.cos(pitch) * Math.sin(yaw) * reach,
+    z: pose.eye.z + Math.sin(pitch) * reach,
+  } };
+  applyPose(camera, adjusted);
+  camera.ballFrame = camera.project(point);
+  return adjusted;
+}
+
 // Ease between two camera poses, so switching views is a move rather than a cut.
 export function blendPose(a, b, t) {
   // Exact at the ends, so a fully blended pose is the pose, not a value a
@@ -201,13 +243,11 @@ export function blendPose(a, b, t) {
   return { eye: mix(a.eye, b.eye), target: mix(a.target, b.target), fov: a.fov + (b.fov - a.fov) * t };
 }
 
-// Fitted by a search over the parameter space that required the ball to stay
-// comfortably inside the frame from every point on the pitch, and both
-// touchlines to be visible, at four screen sizes. `test/camera.test.js`
-// re-checks it.
+// Nearby play replaces the old whole-pitch fit. The ball stays near the
+// centre even at pitch edges; screen-size tests check player readability.
 const SIDE = {
-  landscape: { distance: 10, height: 24, fov: 62, track: 0.6, trackY: 0.15, aimAcross: 0.4, lead: 0 },
-  portrait: { distance: 18, height: 44, fov: 70, track: 1, trackY: 0, aimAcross: 0.4, lead: 8 },
+  landscape: { distance: 20, height: 12, fov: 46 },
+  portrait: { distance: 20, height: 12, fov: 64 },
 };
 
 // First person: you look out from the player you are playing through, at
