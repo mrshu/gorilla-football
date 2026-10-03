@@ -97,8 +97,9 @@ export const AIM = Object.freeze({
   // real ball physics rather than the ball being dragged along the squiggle.
   groundPassMax: 26, // up to this far the ball is driven along the grass
   loftAngle: 0.52, // radians (~30 deg) for a ball that has to be lifted
-  curlPerMetre: 0.16, // spin gained per metre the drawn line bulges sideways
-  curlMax: 3.2,
+  curlPerMetre: 0.1, // spin gained per metre a simple arc bulges sideways
+  // Magnus / spin decay is 1, so this caps a kick's entire turn at ~32°.
+  curlMax: 0.55,
   moveOrderRadius: 1.6, // how close a player must get to a tapped point
 });
 

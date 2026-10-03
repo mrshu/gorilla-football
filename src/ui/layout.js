@@ -37,8 +37,8 @@ function buttonCluster(cx, cy, br, flip, bounds) {
 
 // `sameSide` is true when both humans play on the same team (co-op). They then
 // both face the screen the same way up instead of sitting at opposite ends.
-// Whole-team play needs no on-screen controls at all: the whole canvas is the
-// control. Two humans split it so each has their own touch area.
+// Whole-team play uses the grass for movement and kicks, with one separate
+// special button per human. Two humans split the touch area.
 export function computeAimLayout(w, h, humanCount, viewAttackDir, firstPerson = false) {
   const portrait = h > w;
   const hud = { x: 0, y: 0, w, h: HUD_H };
@@ -66,18 +66,28 @@ export function computeAimLayout(w, h, humanCount, viewAttackDir, firstPerson = 
     shooter: false, // true while the camera should be in close behind a shot
     shotAnchor: null,
     zones,
+    specialButtons: zones.map((zone, human) => {
+      const bw = Math.min(144, zone.w - 16);
+      return { human, x: human === 0 ? zone.x + 8 : zone.x + zone.w - bw - 8, y: zone.y + zone.h - 64, w: bw, h: 56 };
+    }),
     hud,
     controls: [],
     pauseBtn: { cx: w - 20, cy: hud.y + HUD_H / 2, r: 15 },
   };
 }
 
-export function computeLayout(w, h, humanCount, sameSide = false) {
+export function computeLayout(w, h, humanCount, sameSide = false, decisionLayout = null) {
   const portrait = h > w;
   const layout = { w, h, portrait, humanCount, sameSide, controls: [], hud: { x: 0, y: 0, w, h: HUD_H } };
   const pitchArea = { x: 0, y: HUD_H, w, h: h - HUD_H };
 
-  if (!portrait) {
+  if (decisionLayout) {
+    // Frozen decisions use a reserved dock. Refit the complete pitch above
+    // or below it so every pass receiver remains visible and clickable.
+    Object.assign(pitchArea, decisionLayout.pitchArea);
+    layout.hud = decisionLayout.hud;
+    layout.decision = decisionLayout;
+  } else if (!portrait) {
     const col = clampNum(w * 0.19, 110, 210);
     pitchArea.x = col;
     pitchArea.w = w - 2 * col;

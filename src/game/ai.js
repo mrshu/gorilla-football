@@ -65,14 +65,21 @@ export function updateOutfieldAI(match, p, dt) {
     if (match.ball.owner === p.id) p.facing = norm(sub(order, p.pos));
     return;
   }
-  if (ball.owner === p.id) return carryBall(match, p, dt);
+  if (ball.owner === p.id) {
+    p.ai.tackleReady = 0;
+    return carryBall(match, p, dt);
+  }
   if (ball.homing && ball.homing.playerId === p.id) {
     moveTo(match, p, ball.pos, 1);
     return;
   }
   const possession = cache.possession;
-  if (possession === p.team) return support(match, p);
-  if (possession !== null) return defend(match, p);
+  if (possession === p.team) {
+    p.ai.tackleReady = 0;
+    return support(match, p);
+  }
+  if (possession !== null) return defend(match, p, dt);
+  p.ai.tackleReady = 0;
   return looseBall(match, p);
 }
 
@@ -197,7 +204,7 @@ function outfieldRank(match, p, refPos) {
   return rank;
 }
 
-function defend(match, p) {
+function defend(match, p, dt) {
   const ball = match.ball;
   const carrier = match.frameCache.ballOwner;
   const team = match.teams[p.team];
@@ -205,17 +212,30 @@ function defend(match, p) {
   const dCarrier = dist(p.pos, carrier.pos);
   if (rank < 2 && !(carrier.isGK && carrier.holdingBall > 0)) {
     const lead = add(carrier.pos, scale(carrier.vel, 0.25));
-    moveTo(match, p, lead, 1);
-    if (p.tackleCooldown <= 0) {
-      if (dCarrier < PHYSICS.tackleRange) {
-        match.attemptTackle(p, false);
-      } else if (dCarrier < PHYSICS.slideRange && match.rng.chance(0.008) && p.stats.tackling >= 5) {
-        p.facing = norm(sub(lead, p.pos));
-        match.startSlide(p);
-      }
+    const approach = dot(norm(sub(p.pos, carrier.pos)), carrier.facing);
+    const fromBehind = approach < -0.25;
+    // Get alongside the ball before tackling. Running at the carrier's
+    // back caused repeated risky attempts within seconds of a restart.
+    let target = add(lead, scale(carrier.facing, 1.1));
+    if (fromBehind && dCarrier < 4) {
+      const side = { x: -carrier.facing.y, y: carrier.facing.x };
+      const sideSign = dot(sub(p.pos, carrier.pos), side) >= 0 ? 1 : -1;
+      target = add(target, scale(side, sideSign * 1.5));
+    }
+    moveTo(match, p, target, 1);
+    const canChallenge = rank === 0 && !fromBehind && carrier.protect <= 0
+      && carrier.untackleable <= 0 && p.tackleCooldown <= 0
+      && dCarrier < PHYSICS.tackleRange && dist(p.pos, ball.pos) < 1.65;
+    p.ai.tackleReady = canChallenge ? (p.ai.tackleReady || 0) + dt : 0;
+    // A short window to set their feet also gives the human time to pass.
+    if (p.ai.tackleReady >= 0.25 + (10 - p.stats.tackling) * 0.025) {
+      match.attemptTackle(p, false);
+      p.tackleCooldown = Math.max(p.tackleCooldown, 2.4);
+      p.ai.tackleReady = 0;
     }
     return;
   }
+  p.ai.tackleReady = 0;
   // Mark the nearest opponent near my zone, goal-side.
   const home = homePosition(match, p, ball.pos, 'defend');
   const ownGoal = goalCenter(-team.attackDir);
@@ -243,7 +263,11 @@ function looseBall(match, p) {
   // teammate would, so the person holding the phone stays involved.
   const chaseRank = match.isAssisted(p) ? 3 : 2;
   if (rank < chaseRank && !ball.unstoppable) {
-    const target = { x: clamp(predicted.x, 0.5, PITCH.length - 0.5), y: clamp(predicted.y, 0.5, PITCH.width - 0.5) };
+    // Shorten the prediction as we approach the ball. A fixed lead made a
+    // defender on a pass lane turn away and run ahead of the incoming ball.
+    const interceptTime = clamp(dist(p.pos, ball.pos) / Math.max(1, len(ball.vel)) * 0.35, 0, 0.45);
+    const intercept = add(ball.pos, scale(ball.vel, interceptTime));
+    const target = { x: clamp(intercept.x, 0.5, PITCH.length - 0.5), y: clamp(intercept.y, 0.5, PITCH.width - 0.5) };
     moveTo(match, p, target, 1);
     return;
   }

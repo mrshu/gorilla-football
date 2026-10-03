@@ -31,6 +31,19 @@ test('a short drag reads as a tap, not a kick', () => {
   assert.equal(r.power, 0);
 });
 
+test('a loop returning to its start remains a stroke rather than becoming a run tap', () => {
+  const input = makeInput();
+  input.onDown(pointer(1, 200, 600));
+  for (const [x, y] of [[260, 550], [200, 500], [140, 550], [200, 600]]) {
+    input.onMove(pointer(1, x, y));
+  }
+  assert.equal(input.aimState(0).active, true);
+  input.onUp(pointer(1, 200, 600));
+  const [release] = input.drainReleases();
+  assert.equal(release.tap, false);
+  assert.ok(release.path.length >= 4);
+});
+
 test('power grows with drag length and saturates at full stretch', () => {
   const input = makeInput();
   const short = drag(input, { x: 200, y: 600 }, { x: 200, y: 600 - (AIM.tapPx + 30) });
@@ -83,4 +96,107 @@ test('releases queue up and drain once', () => {
   input.released.push({ human: 0, tap: false, dir: { x: 1, y: 0 }, power: 0.5 });
   assert.equal(input.drainReleases().length, 1);
   assert.equal(input.drainReleases().length, 0);
+});
+
+const pointer = (pointerId, x, y) => ({ pointerId, clientX: x, clientY: y, preventDefault() {} });
+const specialButton = { human: 0, x: 8, y: 720, w: 140, h: 56, enabled: true };
+
+test('special touch is a separate action and never a grass gesture', () => {
+  const input = makeInput();
+  input.configure({ specialButtons: [specialButton] });
+  input.onDown(pointer(1, 70, 744));
+  assert.equal(input.hasGesture, false);
+  input.onMove(pointer(1, 90, 750));
+  input.onUp(pointer(1, 90, 750));
+  assert.deepEqual(input.drainSpecials(), [0]);
+  assert.deepEqual(input.drainSpecials(), []);
+  assert.deepEqual(input.drainReleases(), []);
+});
+
+test('disabled specials, cancelled touches and release outside button do nothing', () => {
+  const input = makeInput();
+  input.configure({ specialButtons: [{ ...specialButton, enabled: false }] });
+  input.onDown(pointer(1, 70, 744));
+  input.onUp(pointer(1, 70, 744));
+  input.configure({ specialButtons: [specialButton] });
+  input.onDown(pointer(2, 70, 744));
+  input.onCancel(pointer(2, 70, 744));
+  input.onUp(pointer(2, 70, 744));
+  input.onDown(pointer(3, 70, 744));
+  input.onUp(pointer(3, 200, 700));
+  assert.deepEqual(input.drainSpecials(), []);
+  assert.deepEqual(input.drainReleases(), []);
+});
+
+test('a special that becomes unavailable while held is not queued', () => {
+  const input = makeInput();
+  input.configure({ specialButtons: [specialButton] });
+  input.onDown(pointer(1, 70, 744));
+  input.configure({ specialButtons: [{ ...specialButton, enabled: false }] });
+  input.onUp(pointer(1, 70, 744));
+  assert.deepEqual(input.drainSpecials(), []);
+});
+
+test('keyboard specials support both humans without key repeat or modified shortcuts', () => {
+  const input = makeInput();
+  input.configure({ specialButtons: [specialButton, { ...specialButton, human: 1 }] });
+  input.onKey({ key: 'L' });
+  input.onKey({ key: 'l', repeat: true });
+  input.onKey({ key: '3' });
+  input.onKey({ key: '3', metaKey: true });
+  assert.deepEqual(input.drainSpecials(), [0, 1]);
+  input.configure({ specialButtons: [{ ...specialButton, enabled: false }] });
+  input.onKey({ key: 'l' });
+  input.onKey({ key: '3' });
+  assert.deepEqual(input.drainSpecials(), []);
+});
+
+test('pointercancel discards an aimed shot and a tap', () => {
+  const input = makeInput();
+  for (const to of [{ x: 200, y: 500 }, { x: 200, y: 700 }]) {
+    input.onDown(pointer(1, 200, 700));
+    input.onMove(pointer(1, to.x, to.y));
+    assert.equal(input.hasGesture, true);
+    input.onCancel(pointer(1, to.x, to.y));
+    input.onUp(pointer(1, to.x, to.y));
+    assert.equal(input.hasGesture, false);
+  }
+  assert.deepEqual(input.drainReleases(), []);
+});
+
+test('reset clears held gestures, special touches and queued actions', () => {
+  const input = makeInput();
+  input.configure({ specialButtons: [specialButton] });
+  input.onDown(pointer(1, 200, 700));
+  input.onDown(pointer(2, 70, 744));
+  input.onKey({ key: 'l' });
+  input.reset();
+  input.onUp(pointer(1, 200, 500));
+  input.onUp(pointer(2, 70, 744));
+  assert.equal(input.hasGesture, false);
+  assert.deepEqual(input.drainSpecials(), []);
+  assert.deepEqual(input.drainReleases(), []);
+});
+
+test('gesture projection and kicker identity stay fixed when live camera and owner change', () => {
+  const input = makeInput();
+  let owner = 8;
+  const snapshot = {
+    dragToGround: () => ({ x: 1, y: 0 }),
+    screenToGround: (x, y) => ({ x, y }),
+  };
+  const camera = { ...snapshot, clone: () => snapshot };
+  input.configure({ camera, getKickOwner: () => owner });
+  input.onDown(pointer(1, 200, 700));
+  camera.dragToGround = () => ({ x: -1, y: 0 });
+  camera.screenToGround = (x, y) => ({ x: x + 100, y: y + 100 });
+  owner = 9;
+  input.onMove(pointer(1, 200, 500));
+  assert.equal(input.aimState(0).kickerId, 8);
+  assert.deepEqual(input.aimState(0).path, [{ x: 200, y: 700 }, { x: 200, y: 500 }]);
+  input.onUp(pointer(1, 200, 500));
+  const release = input.drainReleases()[0];
+  assert.equal(release.kickerId, 8);
+  assert.deepEqual(release.dir, { x: 1, y: 0 });
+  assert.deepEqual(release.path, [{ x: 200, y: 700 }, { x: 200, y: 500 }]);
 });

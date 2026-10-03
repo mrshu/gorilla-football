@@ -41,6 +41,19 @@ export function updateGoalkeeper(match, gk, dt) {
   let target = null;
   let speed = 1;
 
+  // Meet an attacker carrying into the box, rather than retreating along
+  // the goal-ball line and allowing the dribble to pass through our hands.
+  const carrier = ball.owner !== null ? match.getPlayer(ball.owner) : null;
+  if (carrier && carrier.team !== gk.team && isInPenaltyArea(ball.pos, -ad)
+      && ballToLine < 14 && Math.abs(ball.pos.y - HALF_W) < 12) {
+    const intercept = add(ball.pos, scale(carrier.vel, 0.18));
+    target = {
+      x: ownGoal.x + ad * clamp((intercept.x - ownGoal.x) * ad, 0.8, 11),
+      y: clamp(intercept.y, HALF_W - 13, HALF_W + 13),
+    };
+    speed = 1;
+  }
+
   // Shot incoming: compute where it crosses our x and get there.
   const shotIncoming = ball.owner === null && towardGoal > 5 && ballToLine < 32 && !ball.unstoppable;
   if (!shotIncoming) gk.ai.sawShot = false;

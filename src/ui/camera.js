@@ -45,6 +45,15 @@ export class Camera {
     this.recompute();
   }
 
+  // A gesture uses the projection it started in, even if play or the view
+  // changes before its final pointer event is processed.
+  clone() {
+    const camera = new Camera();
+    camera.setViewport(this.viewport.w, this.viewport.h);
+    camera.setView(this.eye, this.target, this.fovY * 180 / Math.PI);
+    return camera;
+  }
+
   recompute() {
     const f = norm3(sub3(this.target, this.eye));
     // World up is +z. Guard against a perfectly vertical camera.

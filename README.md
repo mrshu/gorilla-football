@@ -12,8 +12,8 @@ that needs no network at all. Both paths use the same camera maths, so the game
 plays identically either way.
 
 You run the whole team, not one striker, with one finger: **tap to dribble, or
-draw a line and the ball follows it**. Curve the line around a defender and the
-ball curves with it. There is no separate pass and shoot button.
+draw a line to aim the ball**. A simple curved line adds a bounded amount of
+curl. There is no separate pass and shoot button.
 
 ![A match in landscape](docs/screenshots/match.png)
 
@@ -40,6 +40,11 @@ npm run start:node # npx serve on :8000, if you would rather not use python
 npm test           # unit tests (node:test, no dependencies)
 npm run sim        # headless AI-vs-AI match, prints score and event counts
 ```
+
+The simulator runs true AI matches and idle whole-team matches separately.
+Use `npm run sim -- 20 1 42 both --check` for twenty one-minute matches of
+each, starting at seed 42. It checks completion, early fouls and idle carried
+goals, and reports goalkeeper claims separately from shot saves and own goals.
 
 ### Playing on a phone on the same Wi-Fi
 
@@ -70,6 +75,8 @@ included, runs themselves; your job is the ball.
 | **Tap the grass** | Your player runs there, dribbling the ball if they have it. |
 | **Tap an opponent** who has the ball | Get stuck in. |
 | **Draw a line** and release | The ball is struck towards where the line ended. |
+| **Tap the tick marker** | Play the suggested pass to that teammate, or shoot when the marker is at goal. |
+| **SPECIAL** | Use the current player's ability; the button shows readiness, cooldown and uses. |
 
 With no input at all your player simply keeps dribbling. The ball is never
 passed or shot on your behalf, so a pass only happens because you drew one.
@@ -79,13 +86,24 @@ The kick is real football physics rather than the ball being dragged along your
 squiggle. A short line is driven along the grass hard enough to arrive and stop
 on the spot; a long one is lifted and dropped there. Draw further than your
 player can kick and it falls short, as it would. Bend the line and you put curl
-on the ball, so you can bend one round a defender.
+on the ball, so you can bend one round a defender. Curl is bounded so a forward
+kick cannot turn back on itself. Loops and backtracking scribbles add no curl;
+a stroke ending near its start is ignored rather than kicked or treated as a tap.
 
 The line is anchored to the ball, so the shape is what counts, not where on the
 screen you drew it. The ball is interceptible the whole way.
 
 There is no separate pass and shoot button. Draw a line that ends in the net and
 that was a shot.
+
+As soon as your outfield player has the ball, play slows to 8% of normal speed
+to give you time to choose a pass. Drawing a kick freezes play and holds the
+camera fixed; releasing it resumes play. The kick keeps the view it started in.
+Movement is drawn smoothly between physics updates, including in slow motion.
+Losing the carrier cancels that stroke, so release cannot accidentally kick
+through a different player.
+Carrier labels and possession notices show who you are playing through; taps
+also mark accepted run and press targets. Specials are available in open play.
 
 The camera is a **side view** by default, high in the side stand, the way
 football is televised. Carry the ball inside thirty metres of goal and it eases
@@ -95,8 +113,8 @@ the AI plays by. First person, looking out from your own player, is a setting on
 the pre-match screen.
 
 The player on the ball is ringed. Restarts work the same way: aim and release to
-take the throw, corner, free kick or penalty. Leave your carrier alone for six
-seconds and they will play it themselves, so a match never stalls.
+take the throw, corner, free kick or penalty. Leave a restart untaken for six
+seconds and the taker plays it automatically, so a match never stalls.
 
 Two players share the one screen: in portrait the bottom half is player one and
 the top half player two; in landscape it splits left and right. Only the side in
@@ -132,6 +150,8 @@ Your footballer is driven by the same AI as everyone else, and the match
 
 While the panel is open the pitch shows where each pass would travel and where a
 shot would be aimed, so you can read the choice without hunting for it.
+The choices occupy their own area, with the whole pitch fitted above them
+(below them for player two in portrait versus), keeping every receiver visible.
 
 The match freezes when you win the ball, when you carry it into shooting range,
 when an opponent closes you down, after a few seconds of untroubled dribbling,
@@ -145,6 +165,7 @@ player away from you.
 Desktop fallback for testing: player 1 uses `WASD` + `J` / `K` / `L`, player 2
 uses the arrow keys + `1` / `2` / `3`, `Esc` pauses. `Esc` also works while a
 decision panel is open.
+In whole-team play, `L` and `3` activate player one's and player two's special.
 
 ## Modes
 

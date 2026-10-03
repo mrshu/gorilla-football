@@ -103,3 +103,38 @@ test('joystick direction maps back to the world consistently', () => {
     }
   }
 });
+
+test('whole-team special buttons stay inside their own human touch areas', async () => {
+  const { computeAimLayout } = await import('../src/ui/layout.js');
+  for (const [w, h] of SIZES) {
+    for (const humans of [1, 2]) {
+      const layout = computeAimLayout(w, h, humans, 1);
+      assert.equal(layout.specialButtons.length, humans);
+      for (const button of layout.specialButtons) {
+        const zone = layout.zones[button.human];
+        assert.ok(button.w >= 120 && button.h >= 44, 'thumb-sized button');
+        assert.ok(button.x >= zone.x && button.x + button.w <= zone.x + zone.w);
+        assert.ok(button.y >= zone.y && button.y + button.h <= zone.y + zone.h);
+      }
+    }
+  }
+});
+
+test('decision dock reserves space without covering any part of the pitch', async () => {
+  const { computeDecisionLayout } = await import('../src/ui/decision-layout.js');
+  for (const [w, h] of SIZES) {
+    for (const flip of [false, true]) {
+      const dock = computeDecisionLayout(w, h, 5, { flip });
+      const layout = computeLayout(w, h, 2, false, dock);
+      assert.equal(layout.decision, dock);
+      assert.deepEqual(layout.controls, []);
+      assert.deepEqual(layout.hud, dock.hud);
+      const p = layout.pitch;
+      const reserved = dock.pitchArea;
+      assert.ok(p.x >= reserved.x - 1 && p.x + p.w <= reserved.x + reserved.w + 1);
+      assert.ok(p.y >= reserved.y - 1 && p.y + p.h <= reserved.y + reserved.h + 1);
+      const panel = dock.panel;
+      assert.ok(p.y + p.h <= panel.y + 1 || p.y >= panel.y + panel.h - 1);
+    }
+  }
+});

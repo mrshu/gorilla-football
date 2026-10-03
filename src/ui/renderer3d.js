@@ -37,6 +37,7 @@ export class Renderer3D {
 
   // Smoothly follow the ball so the camera never snaps.
   updateCamera(match, layout, dt) {
+    if (layout.aiming) return;
     const target = match.ball.pos;
     if (!this.smoothBall) this.smoothBall = { ...target };
     const k = 1 - Math.exp(-6 * Math.max(0, Math.min(dt, 0.1)));
@@ -396,7 +397,7 @@ export class Renderer3D {
 
     const controlled = opts.controlledIds && opts.controlledIds.has(p.id);
     if (controlled) {
-      ctx.strokeStyle = opts.controlColours?.[p.human ?? 0] || '#ffe600';
+      ctx.strokeStyle = opts.controlledColours?.get(p.id) || opts.controlColours?.[p.human ?? 0] || '#ffe600';
       ctx.lineWidth = Math.max(1.5, u * 0.09);
       ctx.beginPath();
       ctx.ellipse(px, footY, halfW * 1.7 * u, halfW * 0.7 * u, 0, 0, Math.PI * 2);
@@ -565,9 +566,8 @@ export class Renderer3D {
     this.drawPowerRing(ctx, aim, colour);
   }
 
-  // The line the finger has traced, laid on the grass. This is literally the
-  // route the ball will take, so it is drawn solid and bright with a moving
-  // head rather than as a hint.
+  // The finger's stroke, laid on the grass. Its endpoint sets the kick and
+  // a simple bulge requests bounded curl; the ball follows its own physics.
   drawDrawnPath(ctx, path, colour) {
     const pts = [];
     for (const p of path) {
@@ -586,7 +586,7 @@ export class Renderer3D {
     ctx.strokeStyle = colour;
     ctx.lineWidth = Math.max(3, pts[0].scale * 0.26);
     strokePolyline(ctx, pts);
-    // Head of the line, where the ball will end up.
+    // Head of the stroke: the requested target.
     const tip = pts[pts.length - 1];
     ctx.fillStyle = colour;
     ctx.beginPath();
@@ -619,14 +619,80 @@ export class Renderer3D {
 
   // The yellow tick: where the game reckons the ball should go next. Drawn on
   // the overlay so it looks the same under either pitch renderer.
+  drawControlCues(ctx, match, layout, commands = []) {
+    ctx.save();
+    const owner = match.ball.owner === null ? null : match.getPlayer(match.ball.owner);
+    const selected = new Map();
+    for (let human = 0; human < match.humanInputs.length; human++) {
+      const player = match.activePlayerFor(human);
+      if (!player) continue;
+      const entry = selected.get(player.id) || { player, humans: [] };
+      entry.humans.push(human);
+      selected.set(player.id, entry);
+    }
+    if (owner && !selected.has(owner.id)) selected.set(owner.id, { player: owner, humans: [] });
+    for (const { player, humans } of selected.values()) {
+      const foot = this.camera.project({ ...player.pos, z: 0.06 });
+      if (!foot.visible) continue;
+      const carrier = player.id === owner?.id;
+      const colour = humans.length ? (humans[0] === 0 ? '#ffe600' : '#00e5ff') : '#ff8178';
+      const radius = Math.max(9, Math.min(27, foot.scale * 0.7));
+      ctx.strokeStyle = '#111827';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.ellipse(foot.x, foot.y, radius, radius * 0.45, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = carrier ? 3 : 2;
+      ctx.stroke();
+      const head = this.camera.project({ ...player.pos, z: 2.4 });
+      if (!head.visible) continue;
+      const who = humans.length ? `${humans.map((h) => `P${h + 1}`).join('/')} ` : '';
+      const label = `${who}#${player.number}${carrier ? ' · BALL' : ''}`;
+      ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const width = ctx.measureText(label).width + 12;
+      const x = Math.max(width / 2 + 4, Math.min(layout.w - width / 2 - 4, head.x));
+      const y = Math.max(104, Math.min(layout.h - 106, head.y - 10));
+      ctx.fillStyle = 'rgba(9,11,24,0.9)';
+      roundRect(ctx, x - width / 2, y - 10, width, 20, 5);
+      ctx.fill();
+      ctx.fillStyle = colour;
+      ctx.fillText(label, x, y);
+    }
+    for (let human = 0; human < commands.length; human++) {
+      const cue = commands[human];
+      if (!cue || cue.remaining <= 0) continue;
+      const point = this.camera.project({ ...cue.point, z: 0.1 });
+      if (!point.visible) continue;
+      ctx.globalAlpha = Math.min(1, cue.remaining * 2);
+      ctx.strokeStyle = human === 0 ? '#ffe600' : '#00e5ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 12, 0, Math.PI * 2);
+      ctx.moveTo(point.x - 18, point.y);
+      ctx.lineTo(point.x + 18, point.y);
+      ctx.moveTo(point.x, point.y - 18);
+      ctx.lineTo(point.x, point.y + 18);
+      ctx.stroke();
+      ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.fillText(cue.text, point.x, point.y - 23);
+    }
+    ctx.restore();
+  }
+
   drawSuggestion(ctx, suggestion, dt) {
     if (!suggestion) return;
     const s = this.camera.project({ x: suggestion.point.x, y: suggestion.point.y, z: 1.4 });
     if (!s.visible) return;
     this.suggestPulse = (this.suggestPulse || 0) + (dt || 0);
     const pulse = 1 + Math.sin(this.suggestPulse * 4) * 0.08;
-    const r = Math.max(9, Math.min(26, s.scale * 0.55)) * pulse;
+    const r = Math.max(6, Math.min(14, s.scale * 0.4)) * pulse;
     ctx.save();
+    ctx.globalAlpha = 0.65;
     // Soft glow, then the disc.
     const glow = ctx.createRadialGradient(s.x, s.y, r * 0.2, s.x, s.y, r * 1.9);
     glow.addColorStop(0, 'rgba(255,230,60,0.55)');
@@ -653,6 +719,7 @@ export class Renderer3D {
     ctx.lineTo(s.x + r * 0.45, s.y - r * 0.36);
     ctx.stroke();
     ctx.restore();
+    return { x: s.x, y: s.y, radius: Math.max(24, r * 1.9) };
   }
 
   drawFloats(ctx, layout, dt) {

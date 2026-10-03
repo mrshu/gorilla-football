@@ -23,7 +23,7 @@ export const DEFAULT_DURATION_MINUTES = 5;
 
 // How a human plays.
 //   AIM:      you run the whole team. Everyone moves themselves; you hold,
-//             aim and release to play the ball. One touch, no buttons.
+//             aim and release to play the ball, with a special ability button.
 //   MANUAL:   you drive one player with a joystick and three buttons.
 //   ASSISTED: one player is AI-driven and the match freezes to ask what to do.
 export const CONTROL = Object.freeze({ AIM: 'aim', MANUAL: 'manual', ASSISTED: 'assisted' });

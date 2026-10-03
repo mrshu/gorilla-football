@@ -189,6 +189,58 @@ test('an unusable special is offered but disabled, and cannot be chosen', () => 
   assert.ok(m.pendingDecision, 'panel should stay open after a rejected choice');
 });
 
+test('a staged restart disables specials and cannot silently take an automatic pass', () => {
+  const m = makeMatch({ humans: [{ characterId: 'gorilla' }] });
+  run(m, 3, () => null);
+  const decision = m.pendingDecision;
+  const restart = m.setPiece;
+  const player = m.getPlayer(decision.playerId);
+  const special = decision.options.find((option) => option.id === 'special');
+  assert.equal(special.disabled, true);
+  assert.equal(special.detail, 'Available in open play');
+  m.drainEvents();
+  assert.equal(m.resolveDecision({ id: 'special' }), false);
+  assert.equal(m.pendingDecision, decision);
+  assert.equal(m.setPiece, restart);
+  assert.equal(m.ball.owner, player.id);
+  assert.equal(player.ability.usesLeft, 10);
+  assert.deepEqual(m.drainEvents(), [], 'rejecting the special must not pass or fire it');
+  assert.ok(m.resolveDecision(defaultAnswer(decision)), 'a legal kick can still take the restart');
+  assert.equal(m.state, STATES.PLAY);
+});
+
+test('a recovering player has a disabled paced special until recovery completes', () => {
+  for (const recovery of ['stun', 'frozen']) {
+    const m = makeMatch({ humans: [{ characterId: 'gorilla' }] });
+    const player = possessionInPlay(m);
+    player[recovery] = 1;
+    m.openDecision(player, 'possession');
+    const special = m.pendingDecision.options.find((option) => option.id === 'special');
+    assert.equal(special.disabled, true, recovery);
+    assert.match(special.detail, /Recovering/);
+    assert.equal(m.resolveDecision({ id: 'special' }), false);
+    assert.equal(player.ability.usesLeft, 10);
+    assert.ok(m.pendingDecision);
+    m.clearDecision();
+    player[recovery] = 0;
+    m.openDecision(player, 'possession');
+    assert.equal(m.pendingDecision.options.find((option) => option.id === 'special').disabled, false);
+    assert.ok(m.resolveDecision({ id: 'special' }));
+    assert.equal(player.ability.usesLeft, 9);
+  }
+});
+
+test('special eligibility is rechecked if the player changes after the decision opens', () => {
+  const m = makeMatch({ humans: [{ characterId: 'gorilla' }] });
+  const player = possessionInPlay(m);
+  m.openDecision(player, 'possession');
+  assert.equal(m.pendingDecision.options.find((option) => option.id === 'special').disabled, false);
+  player.stun = 1;
+  assert.equal(m.resolveDecision({ id: 'special' }), false);
+  assert.ok(m.pendingDecision);
+  assert.equal(player.ability.usesLeft, 10);
+});
+
 test('an unknown choice is rejected and leaves the panel open', () => {
   const m = makeMatch();
   possessionInPlay(m);

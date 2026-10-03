@@ -3,14 +3,16 @@
 
 import { Match } from '../game/match.js';
 import { normalizeConfig, defaultConfig, humanCount, MODES, CONTROL, VIEW } from '../game/config.js';
-import { PHYSICS, STATES } from '../game/constants.js';
+import { PHYSICS, STATES, AIM } from '../game/constants.js';
 import { computeLayout, computeAimLayout } from './layout.js';
+import { computeDecisionLayout } from './decision-layout.js';
 import { isInShootingRange } from './camera.js';
 import { Renderer } from './renderer.js';
 import { Renderer3D } from './renderer3d.js';
 import { InputManager } from './input.js';
 import { AimInput } from './aiminput.js';
-import { drawHud } from './hud.js';
+import { RenderState } from './render-state.js';
+import { drawHud, getSpecialState } from './hud.js';
 import { loadThree } from './three-loader.js';
 import { RendererWebGL } from './renderer_webgl.js';
 import { showMenu, showHowTo, showSetup, showPause, showHalftime, showFullTime, showDecision } from './screens.js';
@@ -19,6 +21,7 @@ const SCREEN = { MENU: 'menu', HOWTO: 'howto', SETUP: 'setup', MATCH: 'match', D
 const STORE_KEY = 'gorilla-football/setup';
 const CAMERA_TRANSITION_SECONDS = 0.72;
 const CAMERA_TRANSITION_HOLD = 0.12;
+const POSSESSION_TIME_SCALE = 0.08;
 
 export class App {
   constructor({ canvas, gl, hud, overlay }) {
@@ -42,6 +45,12 @@ export class App {
     this.lastTs = 0;
     this.layout = null;
     this.cameraTransition = null;
+    this.possessionNotices = [];
+    this.lastPossession = null;
+    this.commandCues = [];
+    this.suggestionMarkers = [];
+    this.renderState = new RenderState();
+    this.frameSimulationDt = 0;
     this.resize();
     this.initWebGL();
     window.addEventListener('resize', () => this.resize());
@@ -92,6 +101,9 @@ export class App {
   }
 
   resize() {
+    this.suggestionMarkers = [];
+    // A screen rotation invalidates the pixels a held stroke was drawn in.
+    this.aimInput.reset();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.floor(window.innerWidth);
     const h = Math.floor(window.innerHeight);
@@ -116,6 +128,7 @@ export class App {
     }
     this.updateLayerVisibility();
     this.updateLayout();
+    if (this.screen === SCREEN.DECISION) this.showCurrentDecision();
   }
 
   updateLayout() {
@@ -129,10 +142,20 @@ export class App {
       const pitch = this.pitchRenderer;
       pitch.camera.setViewport(this.layout.w, this.layout.h);
       if (this.match) pitch.updateCamera(this.match, this.layout, 1);
-      this.aimInput.configure({ zones: this.layout.zones, pauseButton: this.layout.pauseBtn, camera: pitch.camera });
+      this.aimInput.configure({
+        zones: this.layout.zones,
+        pauseButton: this.layout.pauseBtn,
+        camera: pitch.camera,
+        specialButtons: this.layout.specialButtons,
+        getKickOwner: (human) => this.kickOwnerFor(human),
+        getSuggestionAt: (point, human) => this.suggestionAt(point, human),
+      });
       return;
     }
-    this.layout = computeLayout(this.cssSize.w, this.cssSize.h, humans, mode === MODES.COOP);
+    const decision = this.screen === SCREEN.DECISION ? this.match?.pendingDecision : null;
+    const flip = Boolean(decision && decision.humanIndex === 1 && this.cssSize.h > this.cssSize.w && mode !== MODES.COOP);
+    const dock = decision ? computeDecisionLayout(this.cssSize.w, this.cssSize.h, decision.options.length, { flip }) : null;
+    this.layout = computeLayout(this.cssSize.w, this.cssSize.h, humans, mode === MODES.COOP, dock);
     this.input.setLayout(this.layout);
   }
 
@@ -149,6 +172,7 @@ export class App {
 
   // The camera goes close when your player has the ball within range of goal.
   updateShooter(player) {
+    if (this.aimInput.hasGesture) return;
     const m = this.match;
     const carrier = m.ball.owner !== null ? m.getPlayer(m.ball.owner) : null;
     const mine = carrier && player && carrier.id === player.id && !carrier.isGK;
@@ -176,6 +200,17 @@ export class App {
   }
 
   simulationDelta(dtReal) {
+    // Slow immediately on possession, before the player starts drawing.
+    // A held kick freezes play; a released kick must advance immediately.
+    const released = this.match.aimKicks.some(Boolean);
+    const drawing = this.isDrawingKick();
+    const choosing = this.isChoosingKick();
+    // Possession pacing replaces the automatic camera beat, so an old camera
+    // hold cannot unexpectedly pause the ball after the kick is released.
+    if (released || drawing || choosing) this.cameraTransition = null;
+    if (released) return dtReal;
+    if (drawing) return 0;
+    if (choosing) return dtReal * POSSESSION_TIME_SCALE;
     const transition = this.cameraTransition;
     if (!transition || dtReal <= 0) return dtReal;
     const elapsed = transition.total - transition.remaining;
@@ -189,16 +224,16 @@ export class App {
   // Whose eyes the first-person camera is looking through, and at what.
   // Also decides whether the broadcast camera should drop in behind a player
   // who has carried the ball into range of goal.
-  updateEye() {
+  updateEye(m = this.match, updateFraming = true) {
     if (!this.layout || !this.match) return;
-    const player = this.match.activePlayerFor(0);
+    const player = m.activePlayerFor(0);
     this.layout.eyePlayer = player || null;
-    this.updateShooter(player);
+    if (updateFraming) this.updateShooter(player);
     if (!player) {
-      this.layout.lookAt = { ...this.match.ball.pos };
+      this.layout.lookAt = { ...m.ball.pos };
       return;
     }
-    const ball = this.match.ball;
+    const ball = m.ball;
     const haveIt = ball.owner === player.id;
     if (!haveIt) {
       // Watch the ball.
@@ -206,8 +241,8 @@ export class App {
       return;
     }
     // On the ball, look where you are going: up the pitch, nudged towards goal.
-    const team = this.match.teams[player.team];
-    const goal = this.match.goalTargetFor(player);
+    const team = m.teams[player.team];
+    const goal = m.goalTargetFor(player);
     this.layout.lookAt = {
       x: player.pos.x + team.attackDir * 18 + (goal.x - player.pos.x) * 0.15,
       y: player.pos.y + (goal.y - player.pos.y) * 0.35,
@@ -217,6 +252,9 @@ export class App {
   // --------------------------------------------------------- screens
 
   goMenu() {
+    this.suggestionMarkers = [];
+    this.aimInput.reset();
+    this.aimInput.configure({ specialButtons: [] });
     this.screen = SCREEN.MENU;
     this.match = null;
     this.overlay.hidden = false;
@@ -244,6 +282,14 @@ export class App {
   startMatch() {
     const cfg = normalizeConfig({ ...this.setupState, seed: (Date.now() % 2147483647) | 0 });
     this.match = new Match(cfg);
+    this.screen = SCREEN.MATCH;
+    this.aimInput.reset();
+    this.possessionNotices = [];
+    this.lastPossession = null;
+    this.commandCues = [];
+    this.suggestionMarkers = [];
+    this.renderState?.reset();
+    this.frameSimulationDt = 0;
     this.updateLayout();
     this.input.reset();
     this.aimInput.reset();
@@ -265,10 +311,19 @@ export class App {
     const d = this.match.pendingDecision;
     if (!d) return;
     this.screen = SCREEN.DECISION;
+    this.input.reset();
+    this.updateLayout();
+    this.showCurrentDecision();
+  }
+
+  showCurrentDecision() {
+    const d = this.match?.pendingDecision;
+    if (!d) return;
     // In portrait versus the second player sits at the far end of the device.
     const flip = d.humanIndex === 1 && this.layout.portrait && !this.layout.sameSide;
     showDecision(this.overlay, this.match, d, {
       flip,
+      layout: this.layout.decision,
       onChoose: (choice) => {
         if (!this.match.resolveDecision(choice)) return;
         this.handleEvents(this.match.drainEvents());
@@ -281,6 +336,7 @@ export class App {
     this.overlay.hidden = true;
     this.overlay.innerHTML = '';
     this.screen = SCREEN.MATCH;
+    this.updateLayout();
     this.input.reset();
     this.lastTs = 0;
     this.accumulator = 0;
@@ -289,6 +345,10 @@ export class App {
   pause() {
     if (this.screen !== SCREEN.MATCH && this.screen !== SCREEN.DECISION) return;
     this.screen = SCREEN.PAUSE;
+    this.suggestionMarkers = [];
+    this.aimInput.reset();
+    this.aimInput.configure({ specialButtons: [] });
+    this.input.reset();
     showPause(this.overlay, this.match, {
       onResume: () => this.resumeMatch(),
       onRestart: () => this.startMatch(),
@@ -301,6 +361,8 @@ export class App {
     this.overlay.innerHTML = '';
     this.screen = SCREEN.MATCH;
     this.input.reset();
+    this.aimInput.reset();
+    this.updateLayout();
     this.lastTs = 0;
     if (this.match && this.match.pendingDecision) this.openDecision();
   }
@@ -339,25 +401,98 @@ export class App {
   // Turn finished drags into kicks and taps into presses.
   feedAimInput() {
     const m = this.match;
-    this.aimInput.configure({ camera: this.pitchRenderer.camera });
+    this.aimInput.configure({ camera: this.pitchRenderer.camera,
+      specialButtons: this.layout.specialButtons.map((button) => ({ ...button, enabled: getSpecialState(m, button.human).enabled })),
+    });
+    for (const human of this.aimInput.drainSpecials()) {
+      const state = getSpecialState(m, human);
+      if (state.enabled) m.tryActivateAbility(m.getPlayer(state.playerId));
+    }
     for (const r of this.aimInput.drainReleases()) {
       if (r.tap) {
+        if (r.suggestion) {
+          if (r.kickerId !== this.kickOwnerFor(r.human)) {
+            this.possessionNotices[r.human] = { human: r.human, text: 'Ball changed · choose again', remaining: 1.4 };
+          } else if (!m.playSuggestion(r.human, r.suggestion)) {
+            this.possessionNotices[r.human] = { human: r.human, text: 'Suggestion no longer available', remaining: 1.4 };
+          }
+          continue;
+        }
         // Where on the grass did they tap?
         const cam = this.pitchRenderer.camera;
         const spot = r.screen ? cam.screenToGround(r.screen.x, r.screen.y) : null;
-        m.tap(r.human, spot);
+        if (m.tap(r.human, spot) && spot) {
+          const owner = m.ball.owner === null ? null : m.getPlayer(m.ball.owner);
+          const active = m.activePlayerFor(r.human);
+          const press = owner && active && owner.team !== active.team && Math.hypot(spot.x - owner.pos.x, spot.y - owner.pos.y) < AIM.moveOrderRadius * 2;
+          const point = press ? owner.pos : m.moveOrders[r.human]?.point ?? spot;
+          this.commandCues[r.human] = { point: { ...point }, text: press ? 'PRESS' : 'RUN', remaining: 1.2 };
+        }
         continue;
       }
-      // Prefer the drawn line; fall back to a straight kick if the stroke
-      // could not be resolved onto the grass.
-      if (r.path && m.aimPath(r.human, anchorToBall(r.path, m.ball.pos))) continue;
-      if (!m.aimKick(r.human, r.dir, r.power)) m.tap(r.human);
+      if (r.kickerId === null || r.kickerId !== this.kickOwnerFor(r.human)) {
+        this.possessionNotices[r.human] = { human: r.human, text: 'Ball changed · draw again', remaining: 1.4 };
+        continue;
+      }
+      // A rejected scribble must not become an unrelated straight kick.
+      if (r.path) {
+        if (!m.aimPath(r.human, anchorToBall(r.path, m.ball.pos))) {
+          this.possessionNotices[r.human] = { human: r.human, text: 'Draw a clear direction', remaining: 1.4 };
+        }
+        continue;
+      }
+      m.aimKick(r.human, r.dir, r.power);
+    }
+  }
+
+  kickOwnerFor(human) {
+    if (!this.match?.canKick(human)) return null;
+    return this.match.setPiece?.takerId ?? this.match.ball.owner;
+  }
+
+  suggestionAt(point, human) {
+    const hits = (this.suggestionMarkers || []).filter(marker =>
+      Math.hypot(point.x - marker.x, point.y - marker.y) <= marker.radius);
+    const marker = hits.find(m => m.human === human) || hits[0];
+    return marker ? { ...marker.suggestion, point: { ...marker.suggestion.point }, human: marker.human } : null;
+  }
+
+  isDrawingKick() {
+    for (let human = 0; human < this.match.humanInputs.length; human++) {
+      const aim = this.aimInput.aimState(human);
+      if (aim?.active && aim.kickerId !== null && aim.kickerId === this.kickOwnerFor(human)) return true;
+    }
+    return false;
+  }
+
+  isChoosingKick() {
+    const m = this.match;
+    if (m.state !== STATES.PLAY || m.ball.owner === null) return false;
+    const owner = m.getPlayer(m.ball.owner);
+    if (owner.isGK) return false;
+    return m.humanInputs.some((_, human) => m.canKick(human));
+  }
+
+  updatePossessionFeedback(dt) {
+    for (const notice of this.possessionNotices) if (notice) notice.remaining -= dt;
+    for (const cue of this.commandCues) if (cue) cue.remaining -= dt;
+    const m = this.match;
+    const team = m.ball.owner === null ? null : m.getPlayer(m.ball.owner).team;
+    if (team !== null && team !== this.lastPossession) {
+      if (this.lastPossession !== null) {
+        for (let human = 0; human < m.config.humans.length; human++) {
+          const mine = m.config.humans[human].team === team;
+          this.possessionNotices[human] = { human, text: mine ? 'WON THE BALL' : 'LOST THE BALL', remaining: 1.5 };
+        }
+      }
+      this.lastPossession = team;
     }
   }
 
   tickMatch(dtReal) {
     const m = this.match;
     const simDt = this.isAim ? this.simulationDelta(dtReal) : dtReal;
+    this.frameSimulationDt = simDt;
     if (this.isAim) {
       this.stepMatch(simDt);
       return;
@@ -377,6 +512,7 @@ export class App {
     this.accumulator += dtReal;
     let steps = 0;
     while (this.accumulator >= PHYSICS.dt && steps < 6) {
+      if (this.isAim) (this.renderState ??= new RenderState()).capture(m);
       m.step(PHYSICS.dt);
       this.accumulator -= PHYSICS.dt;
       steps++;
@@ -385,12 +521,16 @@ export class App {
     }
     if (m.state === STATES.HALFTIME && this.screen === SCREEN.MATCH) {
       this.screen = SCREEN.HALFTIME;
+      this.aimInput.reset();
+      this.aimInput.configure({ specialButtons: [] });
       showHalftime(this.overlay, m, () => {
         m.resumeSecondHalf();
         this.resumeMatch();
       });
     } else if (m.state === STATES.FULLTIME && this.screen === SCREEN.MATCH) {
       this.screen = SCREEN.FULLTIME;
+      this.aimInput.reset();
+      this.aimInput.configure({ specialButtons: [] });
       showFullTime(this.overlay, m, {
         onRematch: () => this.startMatch(),
         onMenu: () => this.goMenu(),
@@ -440,30 +580,43 @@ export class App {
 
   render(dtReal) {
     if (this.isAim) {
+      const liveDt = this.screen === SCREEN.MATCH ? dtReal : 0;
+      this.updatePossessionFeedback(liveDt);
+      this.layout.aiming = this.aimInput.hasGesture;
       this.layout.viewAttackDir = this.viewAttackDir();
+      const view = (this.renderState ??= new RenderState()).view(this.match, this.accumulator / PHYSICS.dt);
       const controlledIds = new Set();
+      const controlledColours = new Map();
       const aims = [];
       for (let i = 0; i < this.match.humanInputs.length; i++) {
         const active = this.match.activePlayerFor(i);
-        if (active) controlledIds.add(active.id);
+        if (active) {
+          controlledIds.add(active.id);
+          if (!controlledColours.has(active.id)) controlledColours.set(active.id, i === 0 ? '#ffe600' : '#00e5ff');
+        }
         const state = this.aimInput.aimState(i);
-        if (state && state.active && this.match.canKick(i)) {
+        if (state && state.active && state.kickerId === this.kickOwnerFor(i) && this.match.canKick(i)) {
           aims.push({
             ...state,
-            from: this.match.ball.pos,
-            path: state.path ? anchorToBall(state.path, this.match.ball.pos) : null,
+            from: view.ball.pos,
+            path: state.path ? anchorToBall(state.path, view.ball.pos) : null,
             colour: i === 0 ? '#ffe600' : '#00e5ff',
           });
         }
       }
-      this.updateEye();
+      this.updateEye(view, false);
+      if (this.layout.shotAnchor) this.layout.shotAnchor = {
+        ...this.layout.shotAnchor, carrier: view.getPlayer(this.layout.shotAnchor.carrier.id),
+      };
       const pitch = this.pitchRenderer;
       const dt = this.screen === SCREEN.MATCH ? dtReal : 0;
-      pitch.draw(this.match, this.layout, {
+      pitch.draw(view, this.layout, {
         dt,
+        animationDt: this.screen === SCREEN.MATCH ? this.frameSimulationDt : 0,
         controlledIds,
+        controlledColours,
         controlColours: ['#ffe600', '#00e5ff'],
-        aim: this.useWebGL ? null : aims[0] || null,
+        aim: null,
       });
       // The line you draw and the scoreboard are painted on the overlay so
       // they look identical whichever pitch renderer is running.
@@ -474,13 +627,20 @@ export class App {
           // Reuse the canvas renderer's overlay drawing, pointed at the same
           // camera the WebGL scene is using so the two line up exactly.
           this.renderer3d.camera = this.webgl.camera;
-          this.renderer3d.drawSuggestion(hud, this.match.suggestedTarget(0), dt);
-          if (aims[0]) this.renderer3d.drawAim(hud, this.match, this.layout, { aim: aims[0] });
           this.renderer3d.drawFloats(hud, this.layout, dt);
-        } else {
-          this.renderer3d.drawSuggestion(hud, this.match.suggestedTarget(0), dt);
         }
-        drawHud(hud, this.match, this.layout, { hint: this.aimHint() });
+        this.suggestionMarkers = [];
+        for (let human = 0; human < this.match.humanInputs.length; human++) {
+          const suggestion = this.match.suggestedTarget(human);
+          if (!suggestion) continue;
+          const point = suggestion.playerId === null ? suggestion.point : view.getPlayer(suggestion.playerId).pos;
+          const displayed = { ...suggestion, point: { ...point } };
+          const marker = this.renderer3d.drawSuggestion(hud, displayed, human === 0 ? dt : 0);
+          if (marker) this.suggestionMarkers.push({ ...marker, human, suggestion: displayed });
+        }
+        for (const aim of aims) this.renderer3d.drawAim(hud, this.match, this.layout, { aim });
+        this.renderer3d.drawControlCues(hud, view, this.layout, this.commandCues);
+        drawHud(hud, this.match, this.layout, { hint: this.aimHint(), possessionNotices: this.possessionNotices.filter((n) => n && n.remaining > 0) });
       }
       return;
     }
@@ -504,8 +664,10 @@ export class App {
     const m = this.match;
     if (m.state === STATES.GOAL) return null;
     if (m.canKick(0)) {
-      if (m.state !== STATES.PLAY) return 'Draw to take the restart';
-      return this.layout.shooter ? 'In range · draw your shot' : 'Tap to move · draw to pass or shoot';
+      if (m.state !== STATES.PLAY) return 'Draw or tap the tick';
+      const suggestion = m.suggestedTarget(0);
+      return suggestion ? `Draw a kick · tap the tick to ${suggestion.kind === 'shot' ? 'shoot' : 'pass'}`
+        : 'Tap to move · draw to pass or shoot';
     }
     const owner = m.ball.owner !== null ? m.getPlayer(m.ball.owner) : null;
     if (owner && owner.team !== (m.config.humans[0]?.team ?? 0)) return 'Tap where to run · tap them to tackle';

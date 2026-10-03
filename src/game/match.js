@@ -3,7 +3,7 @@
 // drains `events`; controllers push human input via setHumanInput().
 
 import { PITCH, PHYSICS, TIMING, STATES, SET_PIECES, ROLES, DECISION, AIM } from './constants.js';
-import { add, sub, scale, norm, len, dist, clamp, dot, clampLen, lerp, fromAngle, angle } from './vec.js';
+import { add, sub, scale, norm, len, dist, clamp, dot, clampLen, lerp, fromAngle, angle, rotate } from './vec.js';
 import { createRng } from './rng.js';
 import { createTeam, createPlayer, createBall, slotWorldPos, relToWorld, goalCenter } from './entities.js';
 import { classifyOutOfPlay, offsidePositions, offsideExemptSetPiece, resolveTackle, applyCard, foulRestart, isInPenaltyArea } from './rules.js';
@@ -473,6 +473,9 @@ export class Match {
       else if (input) this.controlAssistedHuman(p, input, dt);
       else if (p.isGK) updateGoalkeeper(this, p, dt);
       else updateOutfieldAI(this, p, dt);
+      // A foul/offside can stage a restart during a controller action.
+      // Preserve its positions instead of running the remaining old frame.
+      if (this.state !== STATES.PLAY) return;
     }
     // Movement
     for (const p of this.players) {
@@ -577,8 +580,19 @@ export class Match {
   aimPath(humanIndex, points) {
     if (!this.canKick(humanIndex)) return false;
     const path = sanitisePath(points);
-    if (path.length < 2) return false;
+    if (path.length < 2 || dist(path[0], path[path.length - 1]) < AIM.pathMinSpacing) return false;
     this.aimKicks[humanIndex] = { path };
+    return true;
+  }
+
+  // Play the displayed marker as its named pass or shot. Keep the carrier
+  // and receiver identities so a stale marker never kicks for another player.
+  playSuggestion(humanIndex, suggestion) {
+    if (!suggestionAction(this, humanIndex, suggestion)) return false;
+    this.aimKicks[humanIndex] = {
+      suggestion: { ...suggestion, point: { ...suggestion.point } },
+      restart: this.setPiece,
+    };
     return true;
   }
 
@@ -633,17 +647,19 @@ export class Match {
       : (this.setPiece ? this.getPlayer(this.setPiece.takerId) : null);
     if (!carrier) return null;
     const setPiece = this.setPiece ? this.setPiece.kind : undefined;
-    const ranked = this.rankPassTargets(carrier, null, { setPiece });
+    const ranked = this.rankPassTargets(carrier, null, { setPiece })
+      .filter((r) => r.player.stun <= 0 && r.player.frozen <= 0);
     const best = ranked.length ? ranked[0] : null;
 
     // If there is a clear sight of goal from close in, that beats any pass.
     const goal = this.goalTargetFor(carrier);
     const dGoal = dist(carrier.pos, goal);
-    if (dGoal < 18 + carrier.stats.shotPower && this.laneIsClear(carrier, goal)) {
-      return { kind: 'shot', point: goal, playerId: null };
+    const identity = { kickerId: carrier.id, setPieceKind: setPiece ?? null };
+    if (setPiece === SET_PIECES.PENALTY || (dGoal < 18 + carrier.stats.shotPower && this.laneIsClear(carrier, goal))) {
+      return { kind: 'shot', point: goal, playerId: null, ...identity };
     }
     if (!best) return null;
-    return { kind: 'pass', point: { ...best.player.pos }, playerId: best.player.id };
+    return { kind: 'pass', point: { ...best.player.pos }, playerId: best.player.id, ...identity };
   }
 
   // Is there a clear run from this player to that point?
@@ -700,6 +716,16 @@ export class Match {
       const kick = this.aimKicks[i];
       this.aimKicks[i] = null;
       if (!kick || !this.canKick(i)) continue;
+      if (kick.suggestion) {
+        const action = suggestionAction(this, i, kick.suggestion);
+        if (!action || this.setPiece !== kick.restart) continue;
+        const { kicker, target, aimY } = action;
+        if (this.setPiece) {
+          this.takeSetPiece(kicker, kick.suggestion.kind === 'shot' ? 'shoot' : 'pass', { x: 0, y: aimY }, { target });
+        } else if (target) this.passTo(kicker, target);
+        else this.shoot(kicker, aimY);
+        continue;
+      }
       const teamIndex = this.config.humans[i]?.team ?? 0;
       if (this.state === STATES.SET_PIECE || this.state === STATES.KICKOFF) {
         const taker = this.getPlayer(this.setPiece.takerId);
@@ -817,7 +843,12 @@ export class Match {
       }
     }
     speed = Math.min(speed, maxSpeed);
-    return { dir, speed, vz, distance, target, spin: drawnCurl(anchored) };
+    const spin = drawnCurl(anchored);
+    // Begin on the drawn arc's side of its chord, then bend back towards
+    // the endpoint. Launching straight at the endpoint first would curl
+    // the ball away on the opposite side of the line the person drew.
+    const curlTurn = PHYSICS.ballMagnus * spin / PHYSICS.ballSpinDecay;
+    return { dir: rotate(dir, -curlTurn / 2), speed, vz, distance, target, spin };
   }
 
   playBallAlongPath(kicker, drawn, { setPieceKind = null } = {}) {
@@ -1057,6 +1088,20 @@ export class Match {
         ball.vel = add(scale(owner.vel, 0.5), scale(norm(owner.facing), 2));
       } else {
         this.snapBallToOwner(owner);
+        // A goalkeeper may smother an opponent's controlled dribble inside
+        // their own box. Ownership must not make the ball untouchable.
+        if (!owner.isGK && owner.untackleable <= 0 && !ball.unstoppable) {
+          const keeper = this.opponentsOf(owner).find((p) => p.isGK);
+          if (keeper && keeper.stun <= 0 && keeper.frozen <= 0
+              && keeper.kickCooldown <= 0 && isInPenaltyArea(keeper.pos, -this.teams[keeper.team].attackDir)
+              && isInPenaltyArea(ball.pos, -this.teams[keeper.team].attackDir)
+              && dist(keeper.pos, ball.pos) <= PHYSICS.controlRadius + 0.1) {
+            this.releaseBall();
+            this.collectBall(keeper, { dribble: true });
+            this.emit('claim', { playerId: keeper.id, victimId: owner.id });
+            return;
+          }
+        }
         if (owner.isGK && ball.owner === owner.id) owner.holdingBall += dt;
         // Sliding tacklers hitting the carrier
         for (const q of this.players) {
@@ -1087,7 +1132,7 @@ export class Match {
     if (best) this.collectBall(best);
   }
 
-  collectBall(p) {
+  collectBall(p, { dribble = false } = {}) {
     const ball = this.ball;
     const speed = len(ball.vel);
     const wasHoming = ball.homing;
@@ -1102,7 +1147,7 @@ export class Match {
     }
     if (p.isGK) {
       // Handled as a catch: goalkeeper module decides catch vs parry
-      const outcome = this.goalkeeperCatch(p);
+      const outcome = this.goalkeeperCatch(p, { dribble });
       if (outcome === 'parry') return;
     }
     ball.owner = p.id;
@@ -1126,16 +1171,18 @@ export class Match {
     }
   }
 
-  goalkeeperCatch(gk) {
+  goalkeeperCatch(gk, { dribble = false } = {}) {
     const ball = this.ball;
     const speed = len(ball.vel);
     if (ball.unstoppable) return 'parry';
     const towardOwnGoal = dot(ball.vel, { x: -this.teams[gk.team].attackDir, y: 0 }) > 0;
     const pCatch = clamp(1 - (speed - 10) / 30, 0.2, 0.95);
-    if (towardOwnGoal && speed > 8) {
+    if (!dribble && towardOwnGoal && speed > 8) {
       this.stats.saves[gk.team]++;
       this.emit('save', { playerId: gk.id });
     }
+    // A slow ball already within arm's reach is a reliable collection.
+    if (dribble || speed <= 10) return 'catch';
     if (this.rng.chance(pCatch)) return 'catch';
     // Parry: deflect away from goal, upfield-ish
     const away = norm(add({ x: this.teams[gk.team].attackDir, y: 0 }, { x: 0, y: this.rng.range(-1.2, 1.2) }));
@@ -1426,15 +1473,22 @@ export class Match {
       });
     }
     const ability = getAbility(p.ability.id);
-    const usable = p.ability.cooldown <= 0 && p.ability.usesLeft > 0 && (!ability.needsBall || this.ball.owner === p.id);
+    const usable = !setPieceKind && p.ability.cooldown <= 0 && p.ability.usesLeft > 0
+      && p.stun <= 0 && p.frozen <= 0 && (!ability.needsBall || this.ball.owner === p.id)
+      && ability.canActivate(this, p);
+    const specialDetail = setPieceKind || !this.isPlayActive()
+      ? 'Available in open play'
+      : p.stun > 0 || p.frozen > 0
+        ? `${ability.name} · Recovering`
+        : p.ability.cooldown > 0
+          ? `${ability.name} · ${Math.ceil(p.ability.cooldown)} s`
+          : Number.isFinite(p.ability.usesLeft)
+            ? `${ability.name} · ${p.ability.usesLeft} left`
+            : ability.name;
     options.push({
       id: 'special',
       label: ability.short || 'SPECIAL',
-      detail: Number.isFinite(p.ability.usesLeft)
-        ? `${ability.name} · ${p.ability.usesLeft} left`
-        : p.ability.cooldown > 0
-          ? `${ability.name} · ${Math.ceil(p.ability.cooldown)} s`
-          : ability.name,
+      detail: specialDetail,
       disabled: !usable,
       quality: 'special',
     });
@@ -1449,18 +1503,14 @@ export class Match {
     const p = this.getPlayer(d.playerId);
     const option = d.options.find((o) => o.id === choice.id && (choice.targetId === undefined || o.targetId === choice.targetId));
     if (!option || option.disabled) return false;
+    // Recheck the actual action before dismissing the panel. A recovering
+    // player or staged restart must not silently turn a special into a pass.
+    if (choice.id === 'special' && (d.setPieceKind || !this.tryActivateAbility(p))) return false;
     this.pendingDecision = null;
 
     if (d.setPieceKind) {
       // The restart is still staged; play it the way the human asked.
       const target = choice.targetId !== undefined ? this.getPlayer(choice.targetId) : null;
-      if (choice.id === 'special') {
-        // A special at a restart fires immediately, then the restart is taken.
-        this.ball.owner = p.id;
-        this.tryActivateAbility(p);
-        if (this.setPiece) this.takeSetPiece(p, 'auto', null);
-        return true;
-      }
       this.takeSetPiece(p, choice.id === 'shoot' ? 'shoot' : 'pass', null, { target });
       return true;
     }
@@ -1476,7 +1526,7 @@ export class Match {
         break;
       }
       case 'special':
-        this.tryActivateAbility(p);
+        // Already activated by the eligibility check above.
         break;
       case 'dribble':
       default:
@@ -1640,17 +1690,18 @@ export class Match {
         ball.vel = scale(ball.vel, ns / speed);
       }
     }
-    // Swerve: a spinning ball is pushed sideways, hardest when it is moving
-    // fastest, and the spin bleeds off as it travels. This is what makes a
-    // curved line produce a curling ball instead of a bent one.
+    // Integrate a bounded turn without adding energy. Decaying spin has a
+    // finite total turn (Magnus * initial spin / decay), so a drawn arc can
+    // bend the kick but cannot reverse its original direction or loop.
     if (ball.spin !== 0) {
       const speed = len(ball.vel);
+      const spin = clamp(ball.spin, -AIM.curlMax, AIM.curlMax);
+      const decay = Math.exp(-PHYSICS.ballSpinDecay * dt);
       if (speed > 0.5) {
-        const side = { x: -ball.vel.y / speed, y: ball.vel.x / speed };
-        const a = PHYSICS.ballMagnus * ball.spin * speed;
-        ball.vel = add(ball.vel, scale(side, a * dt));
+        const turn = PHYSICS.ballMagnus * spin * (1 - decay) / PHYSICS.ballSpinDecay;
+        ball.vel = rotate(ball.vel, turn);
       }
-      ball.spin *= Math.max(0, 1 - PHYSICS.ballSpinDecay * dt);
+      ball.spin = spin * decay;
       if (Math.abs(ball.spin) < 0.02) ball.spin = 0;
     }
     ball.vel = clampLen(ball.vel, PHYSICS.maxBallSpeed);
@@ -1720,19 +1771,46 @@ export class Match {
 
 // ---------------------------------------------------------------- helpers
 
-// Drop points that are too close together, cap the total number, and keep the
-// path inside the pitch so a wild stroke cannot send the ball to another county.
+function suggestionAction(match, humanIndex, suggestion) {
+  if (!Number.isInteger(humanIndex) || !match.config.humans[humanIndex]
+      || !match.canKick(humanIndex) || !suggestion
+      || !['pass', 'shot'].includes(suggestion.kind)
+      || !Number.isFinite(suggestion.point?.x) || !Number.isFinite(suggestion.point?.y)
+      || (suggestion.setPieceKind ?? null) !== (match.setPiece?.kind ?? null)) return null;
+  const kicker = match.setPiece ? match.getPlayer(match.setPiece.takerId) : match.getPlayer(match.ball.owner);
+  if (!kicker || kicker.id !== suggestion.kickerId || kicker.sentOff || kicker.stun > 0
+      || kicker.frozen > 0 || kicker.kickCooldown > 0) return null;
+  if (suggestion.kind === 'pass') {
+    if (match.setPiece?.kind === SET_PIECES.PENALTY) return null;
+    const target = match.rankPassTargets(kicker, null, { setPiece: match.setPiece?.kind })
+      .find((r) => r.player.id === suggestion.playerId)?.player;
+    return target && target.stun <= 0 && target.frozen <= 0 ? { kicker, target, aimY: 0 } : null;
+  }
+  const goal = match.goalTargetFor(kicker);
+  if (suggestion.playerId !== null || dist(suggestion.point, goal) > 1e-6) return null;
+  if (match.setPiece?.kind !== SET_PIECES.PENALTY
+      && (dist(kicker.pos, goal) >= 18 + kicker.stats.shotPower || !match.laneIsClear(kicker, goal))) return null;
+  return { kicker, target: null, aimY: 0 };
+}
+
+// Drop near-duplicates and keep the real release point. Resample long strokes
+// instead of truncating them: the endpoint, not a midway loop, names the kick.
 function sanitisePath(points) {
   const out = [];
+  let last = null;
   for (const p of points) {
     if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
     const q = {
       x: clamp(p.x, -AIM.pathMargin, PITCH.length + AIM.pathMargin),
       y: clamp(p.y, -AIM.pathMargin, PITCH.width + AIM.pathMargin),
     };
+    last = q;
     if (out.length && dist(out[out.length - 1], q) < AIM.pathMinSpacing) continue;
     out.push(q);
-    if (out.length >= AIM.pathMaxPoints) break;
+  }
+  if (out.length > 1) out[out.length - 1] = last;
+  if (out.length > AIM.pathMaxPoints) {
+    return Array.from({ length: AIM.pathMaxPoints }, (_, i) => out[Math.round(i * (out.length - 1) / (AIM.pathMaxPoints - 1))]);
   }
   return out;
 }
@@ -1754,8 +1832,8 @@ function pathLength(points) {
   return total;
 }
 
-// How much a drawn line bulges sideways of the straight chord between its
-// ends, signed, as a spin value. A straight line curls nothing.
+// Only a simple, mostly forward, single-sided arc suggests curl. Loops,
+// zigzags and backtracking still name their endpoint, but do not add spin.
 function drawnCurl(points) {
   if (points.length < 3) return 0;
   const a = points[0];
@@ -1763,13 +1841,24 @@ function drawnCurl(points) {
   const chord = sub(b, a);
   const l = len(chord);
   if (l < 2) return 0;
+  if (pathLength(points) > l * 1.8) return 0;
   const dir = scale(chord, 1 / l);
-  let worst = 0;
+  let positive = 0;
+  let negative = 0;
+  let previousProgress = 0;
+  let backtrack = 0;
   for (const p of points) {
     const rel = sub(p, a);
+    const progress = dot(rel, dir);
+    if (progress < -l * 0.03 || progress > l * 1.03) return 0;
+    backtrack += Math.max(0, previousProgress - progress);
+    previousProgress = progress;
     // Signed perpendicular distance from the chord.
     const off = rel.x * dir.y - rel.y * dir.x;
-    if (Math.abs(off) > Math.abs(worst)) worst = off;
+    positive = Math.max(positive, off);
+    negative = Math.max(negative, -off);
   }
+  if (backtrack > l * 0.08 || Math.min(positive, negative) > Math.max(0.75, Math.max(positive, negative) * 0.2)) return 0;
+  const worst = positive >= negative ? positive : -negative;
   return clamp(worst * AIM.curlPerMetre, -AIM.curlMax, AIM.curlMax);
 }

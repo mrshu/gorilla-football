@@ -7,6 +7,7 @@ import { TEAM_PRESETS } from '../data/teams.js';
 import { JERSEYS, jerseysDistinct } from '../data/jerseys.js';
 import { MODES, MODE_INFO, CONTROL, CONTROL_INFO, VIEW_INFO, DURATION_OPTIONS, humanCount, humanTeamIndex } from '../game/config.js';
 import { getAbility } from '../game/abilities.js';
+import { computeDecisionLayout } from './decision-layout.js';
 
 const el = (tag, cls, html) => {
   const e = document.createElement(tag);
@@ -299,9 +300,16 @@ export function showSetup(root, initial, { onStart, onBack }) {
 
 // The frozen decision panel. `flip` rotates it for a player sitting at the
 // far end of the device in two-player portrait versus.
-export function showDecision(root, match, decision, { onChoose, flip = false }) {
+export function showDecision(root, match, decision, { onChoose, flip = false, layout = null }) {
   root.innerHTML = '';
   root.className = 'overlay decision';
+  const reserved = layout || computeDecisionLayout(window.innerWidth, window.innerHeight, decision.options.length, { flip });
+  root.style.setProperty('--decision-x', `${reserved.panel.x}px`);
+  root.style.setProperty('--decision-y', `${reserved.panel.y}px`);
+  root.style.setProperty('--decision-width', `${reserved.panel.w}px`);
+  root.style.setProperty('--decision-height', `${reserved.panel.h}px`);
+  root.style.setProperty('--decision-columns', reserved.columns);
+  root.style.setProperty('--decision-row-height', `${reserved.rowHeight}px`);
   const player = match.getPlayer(decision.playerId);
   const sheet = el('div', `sheet p${decision.humanIndex + 1}${flip ? ' flip' : ''}`);
 
@@ -311,11 +319,13 @@ export function showDecision(root, match, decision, { onChoose, flip = false }) 
   sheet.append(head);
 
   const grid = el('div', 'dopts');
+  grid.setAttribute('aria-label', 'Choose your next play');
   for (const o of decision.options) {
     const b = el('button', `dopt q-${o.quality || 'ok'}${o.disabled ? ' off' : ''}`);
     b.append(el('span', 'dlabel', o.label));
     b.append(el('span', 'ddetail', o.detail || ''));
     b.disabled = Boolean(o.disabled);
+    b.setAttribute('aria-label', [o.label, o.detail].filter(Boolean).join(' · '));
     if (!o.disabled) b.onclick = () => onChoose({ id: o.id, targetId: o.targetId });
     grid.append(b);
   }

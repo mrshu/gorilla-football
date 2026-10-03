@@ -337,7 +337,7 @@ test('with no input your player just dribbles, indefinitely', () => {
   const start = { ...p.pos };
   // Twenty seconds with nobody touching a control and nobody to challenge.
   for (let i = 0; i < Math.round(20 / PHYSICS.dt); i++) {
-    for (const o of m.teams[1].players) if (!o.isGK) o.pos = { x: 8, y: 4 };
+    for (const o of m.teams[1].players) o.pos = { x: 8, y: 4 };
     m.step(PHYSICS.dt);
     if (m.state !== STATES.PLAY) break;
     assert.equal(m.ball.owner, p.id, `the ball was played for us after ${(i / 60).toFixed(1)} s`);

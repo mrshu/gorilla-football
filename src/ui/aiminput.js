@@ -21,14 +21,22 @@ export class AimInput {
     this.pauseRequested = false;
     this.pauseButton = null;
     this.released = []; // drained by the app each frame
+    this.specialButtons = [];
+    this.specialPointers = new Map();
+    this.specials = [];
+    this.getKickOwner = null;
+    this.getSuggestionAt = null;
     this.bind();
   }
 
   // `zones` splits the canvas between humans; `pauseButton` is a circle.
-  configure({ zones, pauseButton, camera }) {
+  configure({ zones, pauseButton, camera, specialButtons, getKickOwner, getSuggestionAt }) {
     if (zones) this.zones = zones;
     if (pauseButton) this.pauseButton = pauseButton;
     if (camera) this.camera = camera;
+    if (specialButtons) this.specialButtons = specialButtons;
+    if (getKickOwner) this.getKickOwner = getKickOwner;
+    if (getSuggestionAt) this.getSuggestionAt = getSuggestionAt;
   }
 
   bind() {
@@ -37,14 +45,28 @@ export class AimInput {
     c.addEventListener('pointerdown', (e) => this.onDown(e), opts);
     c.addEventListener('pointermove', (e) => this.onMove(e), opts);
     c.addEventListener('pointerup', (e) => this.onUp(e), opts);
-    c.addEventListener('pointercancel', (e) => this.onUp(e), opts);
+    c.addEventListener('pointercancel', (e) => this.onCancel(e), opts);
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     // Guarded so the module can be imported and unit-tested outside a browser.
     if (typeof window !== 'undefined') {
-      window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' || e.key.toLowerCase() === 'p') this.pauseRequested = true;
-      });
+      window.addEventListener('keydown', (e) => this.onKey(e));
     }
+  }
+
+  onKey(e) {
+    if (e.repeat || e.altKey || e.ctrlKey || e.metaKey) return;
+    const key = e.key.toLowerCase();
+    if (key === 'escape' || key === 'p') this.pauseRequested = true;
+    const human = key === 'l' ? 0 : key === '3' ? 1 : -1;
+    const button = this.specialButtons.find((b) => b.human === human);
+    if (button && button.enabled !== false) {
+      e.preventDefault?.();
+      this.specials.push(human);
+    }
+  }
+
+  specialAt(p) {
+    return this.specialButtons.find((b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h);
   }
 
   localPoint(e) {
@@ -74,9 +96,23 @@ export class AimInput {
       this.pauseRequested = true;
       return;
     }
-    const human = this.zoneFor(p);
+    const button = this.specialAt(p);
+    if (button) {
+      // Disabled buttons still consume the touch: never turn them into a
+      // run command or a kick on the pitch behind the control.
+      this.specialPointers.set(e.pointerId, button.human);
+      return;
+    }
+    const zoneHuman = this.zoneFor(p);
+    const suggestion = this.getSuggestionAt?.(p, zoneHuman) ?? null;
+    const human = suggestion?.human ?? zoneHuman;
     if (this.drags.has(human)) return; // one finger per player
-    this.drags.set(human, { start: p, current: p, moved: 0, stroke: [p] });
+    this.drags.set(human, {
+      start: p, current: p, moved: 0, stroke: [p],
+      camera: this.camera?.clone?.() || this.camera,
+      kickerId: this.getKickOwner?.(human) ?? null,
+      suggestion,
+    });
     this.pointers.set(e.pointerId, human);
   }
 
@@ -97,13 +133,29 @@ export class AimInput {
   }
 
   onUp(e) {
+    try { this.canvas.releasePointerCapture?.(e.pointerId); } catch { /* ended pointer */ }
+    if (this.specialPointers.has(e.pointerId)) {
+      const human = this.specialPointers.get(e.pointerId);
+      this.specialPointers.delete(e.pointerId);
+      const button = this.specialAt(this.localPoint(e));
+      if (button?.human === human && button.enabled !== false) this.specials.push(human);
+      return;
+    }
     const human = this.pointers.get(e.pointerId);
     if (human === undefined) return;
     this.pointers.delete(e.pointerId);
     const d = this.drags.get(human);
     this.drags.delete(human);
     if (!d) return;
-    this.released.push({ human, ...this.readDrag(d) });
+    this.released.push({ human, kickerId: d.kickerId, suggestion: d.suggestion, ...this.readDrag(d) });
+  }
+
+  onCancel(e) {
+    this.specialPointers.delete(e.pointerId);
+    const human = this.pointers.get(e.pointerId);
+    this.pointers.delete(e.pointerId);
+    if (human !== undefined) this.drags.delete(human);
+    try { this.canvas.releasePointerCapture?.(e.pointerId); } catch { /* ended pointer */ }
   }
 
   // Turn a drag into { tap, path, dir, power }. `path` is the stroke projected
@@ -113,9 +165,11 @@ export class AimInput {
     const dx = d.current.x - d.start.x;
     const dy = d.current.y - d.start.y;
     const moved = Math.hypot(dx, dy);
-    if (moved < AIM.tapPx) return { tap: true, path: null, dir: null, power: 0, screen: d.start };
-    const dir = this.camera
-      ? this.camera.dragToGround(d.start.x, d.start.y, d.current.x, d.current.y)
+    const tracedStroke = (d.stroke || []).some((p) => Math.hypot(p.x - d.start.x, p.y - d.start.y) >= AIM.tapPx);
+    if (moved < AIM.tapPx && !tracedStroke) return { tap: true, path: null, dir: null, power: 0, screen: d.start };
+    const camera = d.camera || this.camera;
+    const dir = camera
+      ? camera.dragToGround(d.start.x, d.start.y, d.current.x, d.current.y)
       : { x: dx, y: dy };
     const power = Math.min(1, (moved - AIM.tapPx) / (AIM.maxDragPx - AIM.tapPx));
     return { tap: false, path: this.strokeToGround(d), dir, power, screen: d.start };
@@ -124,13 +178,14 @@ export class AimInput {
   // Project every point of the stroke onto the grass. Points above the horizon
   // cannot be resolved, so the path stops there rather than jumping.
   strokeToGround(d) {
-    if (!this.camera) return null;
+    const camera = d.camera || this.camera;
+    if (!camera) return null;
     const pts = (d.stroke || [d.start]).slice();
     const last = pts[pts.length - 1];
     if (!last || Math.hypot(d.current.x - last.x, d.current.y - last.y) > 1) pts.push(d.current);
     const world = [];
     for (const p of pts) {
-      const g = this.camera.screenToGround(p.x, p.y);
+      const g = camera.screenToGround(p.x, p.y);
       if (!g) break;
       world.push({ x: g.x, y: g.y });
     }
@@ -142,14 +197,24 @@ export class AimInput {
     const d = this.drags.get(human);
     if (!d) return null;
     const read = this.readDrag(d);
-    if (read.tap) return { active: false, screen: d.start, power: 0, path: null };
-    return { active: true, dir: read.dir, power: read.power, screen: d.start, path: read.path };
+    if (read.tap) return { active: false, screen: d.start, power: 0, path: null, kickerId: d.kickerId };
+    return { active: true, dir: read.dir, power: read.power, screen: d.start, path: read.path, kickerId: d.kickerId };
+  }
+
+  get hasGesture() {
+    return this.drags.size > 0;
   }
 
   drainReleases() {
     const r = this.released;
     this.released = [];
     return r;
+  }
+
+  drainSpecials() {
+    const actions = [...new Set(this.specials)];
+    this.specials = [];
+    return actions;
   }
 
   takePause() {
@@ -159,9 +224,14 @@ export class AimInput {
   }
 
   reset() {
+    for (const pointer of [...this.pointers.keys(), ...this.specialPointers.keys()]) {
+      try { this.canvas.releasePointerCapture?.(pointer); } catch { /* ended pointer */ }
+    }
     this.drags.clear();
     this.pointers.clear();
     this.released = [];
+    this.specialPointers.clear();
+    this.specials = [];
     this.pauseRequested = false;
   }
 }

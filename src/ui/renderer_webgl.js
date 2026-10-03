@@ -670,6 +670,7 @@ export class RendererWebGL {
   // ---------------------------------------------------------------- frame
 
   updateCamera(match, layout, dt) {
+    if (layout.aiming) return;
     const target = match.ball.pos;
     if (!this.smoothBall) this.smoothBall = { ...target };
     const k = 1 - Math.exp(-6 * Math.max(0, Math.min(dt, 0.1)));
@@ -783,22 +784,22 @@ export class RendererWebGL {
       }
       view.group.position.copy(toThree(THREE, p.pos.x, p.pos.y, 0));
       if (view.kind === 'sprite') this.faceSpriteToCamera(view, p);
-      else if (view.kind === 'humanoid') this.turnHumanoid(view, p, opts.dt || 0);
+      else if (view.kind === 'humanoid') this.turnHumanoid(view, p, opts.animationDt ?? opts.dt ?? 0);
       else {
         // Face the way they are running.
         const f = p.facing;
         view.group.rotation.y = Math.atan2(f.x, -f.y) - Math.PI / 2;
       }
-      this.animate(view, p, opts.dt || 0);
+      this.animate(view, p, opts.animationDt ?? opts.dt ?? 0);
       view.group.position.y += view.bob;
       const controlled = opts.controlledIds && opts.controlledIds.has(p.id);
       view.ring.visible = Boolean(controlled);
-      if (controlled) view.ring.material.color.set(p.human === 1 ? 0x00e5ff : 0xffe600);
+      if (controlled) view.ring.material.color.set(opts.controlledColours?.get(p.id) || (p.human === 1 ? 0x00e5ff : 0xffe600));
     }
 
     const b = match.ball;
     this.ballMesh.position.copy(toThree(THREE, b.pos.x, b.pos.y, Math.max(0.22, b.z + 0.22)));
-    this.ballMesh.rotation.x += 0.25;
+    this.ballMesh.rotation.x += Math.hypot(b.vel.x, b.vel.y) * (opts.animationDt ?? opts.dt ?? 0) / 0.22;
     this.ballShadow.position.copy(toThree(THREE, b.pos.x, b.pos.y, 0.02));
     const lift = Math.min(1, b.z / 6);
     this.ballShadow.scale.setScalar(1 + lift * 1.4);
