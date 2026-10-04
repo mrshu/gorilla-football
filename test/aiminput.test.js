@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AimInput } from '../src/ui/aiminput.js';
-import { Camera } from '../src/ui/camera.js';
+import { Camera, frameFirstPerson, shootingPose, applyPose } from '../src/ui/camera.js';
+import { computeAimLayout } from '../src/ui/layout.js';
 import { AIM, PITCH } from '../src/game/constants.js';
 
 // A canvas stand-in: AimInput only ever listens and measures.
@@ -227,4 +228,85 @@ test('unhandled Escape still pauses from decision buttons while handled maths Es
   assert.equal(input.takePause(), true);
   input.onKey({ key: 'Escape', target, defaultPrevented: true });
   assert.equal(input.takePause(), false);
+});
+
+test('net taps and final release coordinates choose shot height instead of grass behind goal', () => {
+  const input = makeInput();
+  const goal = { x: 105, y: 34 };
+  frameFirstPerson(input.camera, { pos: { x: 94, y: 34 }, facing: { x: 1, y: 0 } }, goal, true);
+  input.configure({ getShootingGoal: () => goal, getKickOwner: () => 9 });
+  const p = input.camera.project({ ...goal, y: 32, z: 1.9 });
+  const pointer = (id, point) => ({ pointerId: id, clientX: point.x, clientY: point.y, preventDefault() {} });
+  input.onDown(pointer(1, p));
+  assert.ok(input.aimState(0).shot, 'tap placement already previews while held');
+  input.onUp(pointer(1, p));
+  const tap = input.drainReleases()[0];
+  assert.equal(tap.tap, false);
+  assert.ok(Math.abs(tap.shot.target.y - 32) < 1e-8);
+  assert.ok(Math.abs(tap.shot.target.z - 1.9) < 1e-8);
+  input.onDown(pointer(2, { x: 200, y: 700 }));
+  // Browsers can coalesce the last move: pointerup still names the target.
+  input.onUp(pointer(2, p));
+  assert.deepEqual(input.drainReleases()[0].shot.target, tap.shot.target);
+});
+
+test('dragging away from the net cancels placement without producing a pass or run', () => {
+  const input = makeInput();
+  const goal = { x: 105, y: 34 };
+  frameFirstPerson(input.camera, { pos: { x: 94, y: 34 }, facing: { x: 1, y: 0 } }, goal, true);
+  input.configure({ getShootingGoal: () => goal, getKickOwner: () => 9 });
+  const p = input.camera.project({ ...goal, z: 1 });
+  const pointer = (point) => ({ pointerId: 1, clientX: point.x, clientY: point.y, preventDefault() {} });
+  input.onDown(pointer(p));
+  input.onMove(pointer({ x: 0, y: 800 }));
+  assert.equal(input.aimState(0).active, false);
+  input.onUp(pointer({ x: 0, y: 800 }));
+  const release = input.drainReleases()[0];
+  assert.equal(release.cancelledShot, true);
+  assert.equal(release.tap, false);
+  assert.equal(release.path, null);
+  assert.equal(release.dir, null);
+});
+
+function splitGoalInput(coop) {
+  const input = makeInput();
+  const goal = { x: 105, y: 34 };
+  const layout = computeAimLayout(390, 844, 2, 1);
+  input.camera.setViewport(layout.w, layout.h);
+  applyPose(input.camera, shootingPose({ pos: { x: 85, y: 34 } }, goal, true));
+  input.configure({
+    zones: layout.zones,
+    getShootingGoal: human => human === 0 || coop ? goal : null,
+    getKickOwner: human => human === 0 || coop ? 9 : null,
+  });
+  const net = input.camera.project({ ...goal, z: 1.8 });
+  assert.equal(input.zoneFor(net), 1, 'the visible upper net lies in P2’s portrait touch zone');
+  return { input, net };
+}
+
+test('portrait versus net touches crossing the split route to the only eligible shooter', () => {
+  const { input, net } = splitGoalInput(false);
+  input.onDown(pointer(1, net.x, net.y));
+  assert.equal(input.aimState(1), null, 'the defending human must not receive the shot');
+  assert.ok(input.aimState(0)?.shot, 'the attacking human previews their placed shot');
+  input.onUp(pointer(1, net.x, net.y));
+  const release = input.drainReleases()[0];
+  assert.equal(release.human, 0);
+  assert.equal(release.kickerId, 9);
+  assert.equal(release.tap, false);
+  assert.equal(release.shot.target.x, 105);
+  assert.ok(Math.abs(release.shot.target.z - 1.8) < 1e-8);
+});
+
+test('portrait co-op net touches preserve zone ownership when both learners can shoot', () => {
+  const { input, net } = splitGoalInput(true);
+  input.onDown(pointer(1, net.x, net.y));
+  assert.equal(input.aimState(0), null, 'routing must not steal the partner’s eligible touch');
+  assert.ok(input.aimState(1)?.shot);
+  input.onUp(pointer(1, net.x, net.y));
+  const release = input.drainReleases()[0];
+  assert.equal(release.human, 1, 'shot ownership determines which learner spends their saved focus');
+  assert.equal(release.kickerId, 9);
+  assert.equal(release.tap, false);
+  assert.equal(release.shot.target.x, 105);
 });

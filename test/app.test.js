@@ -573,3 +573,54 @@ test('spending a maths charge shows feedback in each control mode', () => {
     } else assert.deepEqual(floats, [['Focused kick used', kicker.pos, '#ffe600']]);
   }
 });
+
+test('goal placement is dispatched as a shot and its release immediately resumes physics', () => {
+  const app = harness();
+  const player = app.match.getPlayer(app.match.ball.owner);
+  player.pos = { x: 93, y: 34 };
+  app.match.snapBallToOwner(player);
+  const target = { x: 105, y: 31.5, z: 1.9 };
+  app.aimInput.released.push({ human: 0, kickerId: player.id, tap: false,
+    shot: { target, power: 0.8 } });
+  app.feedAimInput();
+  assert.deepEqual(app.match.aimKicks[0].shot.target, target);
+  assert.equal(app.simulationDelta(1 / 60), 1 / 60);
+  app.match.applyAimInputs();
+  assert.equal(app.match.ball.owner, null);
+  assert.equal(app.match.stats.shots[0], 1);
+  assert.ok(Math.hypot(app.match.ball.vel.x, app.match.ball.vel.y) > 20);
+});
+
+test('cancelled and stolen-ball goal placements never dispatch a pass, run or shot', () => {
+  for (const stolen of [false, true]) {
+    const app = harness();
+    const kickerId = app.match.ball.owner;
+    app.match.drainEvents();
+    const player = app.match.getPlayer(kickerId);
+    player.pos = { x: 93, y: 34 };
+    if (stolen) app.match.ball.owner = app.match.teams[1].players[9].id;
+    app.aimInput.released.push({ human: 0, kickerId, tap: false,
+      cancelledShot: !stolen, shot: stolen ? { target: { x: 105, y: 34, z: 1 }, power: 0.8 } : null });
+    app.feedAimInput();
+    assert.equal(app.match.aimKicks[0], null);
+    assert.equal(app.match.moveOrders[0], null);
+    assert.deepEqual(app.match.drainEvents(), []);
+  }
+});
+
+test('a partners stale held aim cannot keep the shot camera frozen after release', () => {
+  const app = harness({ mode: MODES.COOP });
+  const player = app.match.getPlayer(app.match.ball.owner);
+  player.pos = { x: 93, y: 34 };
+  app.match.snapBallToOwner(player);
+  app.aimInput.drags.set(1, { kickerId: player.id, start: { x: 200, y: 600 },
+    current: { x: 200, y: 400 }, stroke: [{ x: 200, y: 600 }], camera: app.pitchRenderer.camera.clone() });
+  assert.equal(app.isHoldingKick(), true);
+  app.layout.shooter = true;
+  assert.ok(app.match.aimShot(0, { x: 105, y: 32, z: 1.5 }));
+  app.match.applyAimInputs();
+  assert.equal(app.isHoldingKick(), false);
+  assert.equal(app.simulationDelta(1 / 60), 1 / 60);
+  app.updateShooter(player);
+  assert.equal(app.layout.shooter, false, 'released flight exits the old held shooting pose');
+});

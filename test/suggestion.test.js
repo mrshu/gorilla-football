@@ -64,7 +64,7 @@ test('playing a pass suggestion names the displayed receiver and uses normal pas
   assert.ok(m.drainEvents().some((e) => e.type === 'kick' && e.kind === 'pass'));
 });
 
-test('playing a shot suggestion uses normal shot strength, accuracy and stats', () => {
+test('playing a shot suggestion strikes its displayed corner with normal accuracy and stats', () => {
   const { m, kicker } = openMatch();
   const expected = openMatch();
   kicker.pos = { x: 93, y: 34 };
@@ -74,7 +74,7 @@ test('playing a shot suggestion uses normal shot strength, accuracy and stats', 
   const suggestion = m.suggestedTarget(0);
   assert.equal(suggestion.kind, 'shot');
   assert.ok(m.playSuggestion(0, suggestion));
-  expected.m.shoot(expected.kicker, 0);
+  expected.m.shootAt(expected.kicker, suggestion.point, 0.8);
   m.applyAimInputs();
   assert.deepEqual(m.ball.vel, expected.m.ball.vel);
   assert.equal(m.ball.vz, expected.m.ball.vz);

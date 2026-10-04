@@ -145,6 +145,23 @@ Two players share the one screen: in portrait the bottom half is player one and
 the top half player two; in landscape it splits left and right. Only the side in
 possession can kick, so the two never fight over the ball.
 
+### Placing shots
+
+Within 38 metres of the goal, tap inside the highlighted net to shoot at that
+spot, or drag onto it to choose the corner and height. A crosshair and flight
+arc preview the placement while play and the camera stay still. Release to
+strike; a longer drag drives a harder shot. Dragging a net touch away from the
+goal cancels it without passing or sending the player running.
+
+Shots travel through the goal line with character-dependent strength, rather
+than using the stopping distance of a pass. Drawn ground strokes ending at the
+goal also become driven shots. Other drawn passes keep their distance, loft
+and bounded curl. The orange shoot tick chooses a clear side away from the
+keeper, and strikes its displayed spot. Direct free kicks and penalties use
+the same placement controls from first person. Accuracy still depends on the
+character; a saved Focused kick reduces aiming error without guaranteeing a
+goal or changing shot speed.
+
 ### One player
 
 You drive a single outfield player, marked with a ring, seen from straight

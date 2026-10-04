@@ -7,6 +7,7 @@
 
 import { AIM } from '../game/constants.js';
 import { isUiKeyboardTarget } from './input.js';
+import { shotTargetAt } from './shot-aim.js';
 
 // Stroke sampling, in canvas pixels.
 const STROKE_MIN_PX = 6;
@@ -27,17 +28,19 @@ export class AimInput {
     this.specials = [];
     this.getKickOwner = null;
     this.getSuggestionAt = null;
+    this.getShootingGoal = null;
     this.bind();
   }
 
   // `zones` splits the canvas between humans; `pauseButton` is a circle.
-  configure({ zones, pauseButton, camera, specialButtons, getKickOwner, getSuggestionAt }) {
+  configure({ zones, pauseButton, camera, specialButtons, getKickOwner, getSuggestionAt, getShootingGoal }) {
     if (zones) this.zones = zones;
     if (pauseButton) this.pauseButton = pauseButton;
     if (camera) this.camera = camera;
     if (specialButtons) this.specialButtons = specialButtons;
     if (getKickOwner) this.getKickOwner = getKickOwner;
     if (getSuggestionAt) this.getSuggestionAt = getSuggestionAt;
+    if (getShootingGoal) this.getShootingGoal = getShootingGoal;
   }
 
   bind() {
@@ -108,13 +111,25 @@ export class AimInput {
     }
     const zoneHuman = this.zoneFor(p);
     const suggestion = this.getSuggestionAt?.(p, zoneHuman) ?? null;
-    const human = suggestion?.human ?? zoneHuman;
+    let human = suggestion?.human ?? zoneHuman;
+    const camera = this.camera?.clone?.() || this.camera;
+    let goal = this.getShootingGoal?.(human);
+    // A visible goal may cross the split-screen boundary. Like a tick, its
+    // touch belongs to an eligible shooter, rather than a defending player.
+    if (!suggestion && !shotTargetAt(camera, p, goal)) {
+      for (let other = 0; other < this.zones.length; other++) {
+        const otherGoal = this.getShootingGoal?.(other);
+        if (shotTargetAt(camera, p, otherGoal)) { human = other; goal = otherGoal; break; }
+      }
+    }
     if (this.drags.has(human)) return; // one finger per player
     this.drags.set(human, {
       start: p, current: p, moved: 0, stroke: [p],
-      camera: this.camera?.clone?.() || this.camera,
+      camera,
       kickerId: this.getKickOwner?.(human) ?? null,
       suggestion,
+      goal: goal ? { ...goal } : null,
+      beganOnGoal: !suggestion && Boolean(goal && shotTargetAt(camera, p, goal)),
     });
     this.pointers.set(e.pointerId, human);
   }
@@ -150,6 +165,7 @@ export class AimInput {
     const d = this.drags.get(human);
     this.drags.delete(human);
     if (!d) return;
+    d.current = this.localPoint(e);
     this.released.push({ human, kickerId: d.kickerId, suggestion: d.suggestion, ...this.readDrag(d) });
   }
 
@@ -169,8 +185,15 @@ export class AimInput {
     const dy = d.current.y - d.start.y;
     const moved = Math.hypot(dx, dy);
     const tracedStroke = (d.stroke || []).some((p) => Math.hypot(p.x - d.start.x, p.y - d.start.y) >= AIM.tapPx);
-    if (moved < AIM.tapPx && !tracedStroke) return { tap: true, path: null, dir: null, power: 0, screen: d.start };
     const camera = d.camera || this.camera;
+    const target = d.goal && shotTargetAt(camera, d.current, d.goal);
+    if (target && (d.beganOnGoal || moved >= AIM.tapPx || tracedStroke)) {
+      const power = moved < AIM.tapPx ? 0.8 : Math.min(1, 0.65 + moved / AIM.maxDragPx * 0.35);
+      return { tap: false, path: null, dir: null, power, shot: { target, power }, screen: d.start };
+    }
+    if (d.beganOnGoal) return { tap: false, cancelledShot: true, path: null, dir: null, power: 0, screen: d.start };
+    if (moved < AIM.tapPx && !tracedStroke) return { tap: true, path: null, dir: null, power: 0, screen: d.start,
+      ground: camera?.screenToGround(d.start.x, d.start.y) ?? null };
     const dir = camera
       ? camera.dragToGround(d.start.x, d.start.y, d.current.x, d.current.y)
       : { x: dx, y: dy };
@@ -201,7 +224,8 @@ export class AimInput {
     if (!d) return null;
     const read = this.readDrag(d);
     if (read.tap) return { active: false, screen: d.start, power: 0, path: null, kickerId: d.kickerId };
-    return { active: true, dir: read.dir, power: read.power, screen: d.start, path: read.path, kickerId: d.kickerId };
+    return { active: !read.cancelledShot, dir: read.dir, power: read.power, screen: d.start,
+      path: read.path, shot: read.shot, kickerId: d.kickerId };
   }
 
   get hasGesture() {

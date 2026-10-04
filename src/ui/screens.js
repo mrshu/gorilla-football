@@ -68,12 +68,13 @@ export function showHowTo(root, onBack) {
       <li><b>Tap an opponent</b> who has the ball to get stuck in.</li>
       <li><b>Draw a line</b> with your finger and release. The ball is struck towards where the line ended.</li>
       <li><b>Tap the tick</b> to play the suggested pass or shot.</li>
+      <li><b>Tap inside the net</b> when close to goal to shoot at that spot. Drag onto the net to choose a corner and height; release to strike.</li>
     </ul>
     <p>The kick itself is real football physics. A short line is driven along the grass hard enough to arrive and stop there; a long one is lifted and dropped on the spot. Draw further than your player can kick and it falls short, as it would.</p>
     <p>A simple curved line adds bounded curl. Loops and backtracking add no artificial spin, and a closed stroke is ignored.</p>
-    <p>There is no separate pass and shoot. Draw a line that ends in the net and that was a shot.</p>
+    <p>Shots are driven through the goal, rather than stopping there like a pass. While aiming, a crosshair and flight arc show the shot you are placing. Drag away from the net before releasing to cancel a net touch. Character accuracy and earned Focused kicks still matter.</p>
     <p>Possession slows play immediately, giving you time to choose. Drawing a kick freezes play and the camera; releasing it resumes play.</p>
-    <p>Once you carry the ball inside thirty metres of goal the camera drops in behind you, low and facing the goal, to line up the shot. A yellow tick marks where the game reckons the ball should go next.</p>
+    <p>Once you carry the ball inside thirty metres of goal the camera drops in behind you, low and facing the goal, to line up the shot. The orange shoot tick picks a clear corner away from the keeper; the yellow pass tick marks a teammate.</p>
     <p>The camera is a <b>side view</b> by default, the way football is televised. First person, looking out from your own player, is a setting on the pre-match screen.</p>
     <p>Your free kicks and penalties use the taker's <b>first-person view</b> while you line up the kick and follow the ball. The view stays steady while you draw, then returns to your chosen camera at the next possession or stoppage.</p>
     <p>The player on the ball is ringed. Untaken restarts are played automatically after a few seconds.</p>

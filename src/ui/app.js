@@ -159,6 +159,7 @@ export class App {
         specialButtons: this.layout.specialButtons,
         getKickOwner: (human) => this.kickOwnerFor(human),
         getSuggestionAt: (point, human) => this.suggestionAt(point, human),
+        getShootingGoal: (human) => this.match?.shootingGoal(human),
       });
       return;
     }
@@ -182,7 +183,7 @@ export class App {
 
   // The camera goes close when your player has the ball within range of goal.
   updateShooter(player) {
-    if (this.aimInput.hasGesture) return;
+    if (this.isHoldingKick()) return;
     const m = this.match;
     const carrier = m.ball.owner !== null ? m.getPlayer(m.ball.owner) : null;
     const mine = carrier && player && carrier.id === player.id && !carrier.isGK;
@@ -506,7 +507,7 @@ export class App {
         }
         // Where on the grass did they tap?
         const cam = this.pitchRenderer.camera;
-        const spot = r.screen ? cam.screenToGround(r.screen.x, r.screen.y) : null;
+        const spot = r.ground !== undefined ? r.ground : r.screen ? cam.screenToGround(r.screen.x, r.screen.y) : null;
         if (m.tap(r.human, spot) && spot) {
           const owner = m.ball.owner === null ? null : m.getPlayer(m.ball.owner);
           const active = m.activePlayerFor(r.human);
@@ -518,6 +519,16 @@ export class App {
       }
       if (r.kickerId === null || r.kickerId !== this.kickOwnerFor(r.human)) {
         this.possessionNotices[r.human] = { human: r.human, text: 'Ball changed · draw again', remaining: 1.4 };
+        continue;
+      }
+      if (r.cancelledShot) {
+        this.possessionNotices[r.human] = { human: r.human, text: 'Shot cancelled · aim inside the net', remaining: 1.4 };
+        continue;
+      }
+      if (r.shot) {
+        if (!m.aimShot(r.human, r.shot.target, r.shot.power)) {
+          this.possessionNotices[r.human] = { human: r.human, text: 'Shot no longer available', remaining: 1.4 };
+        }
         continue;
       }
       // A rejected scribble must not become an unrelated straight kick.
@@ -547,6 +558,13 @@ export class App {
     for (let human = 0; human < this.match.humanInputs.length; human++) {
       const aim = this.aimInput.aimState(human);
       if (aim?.active && aim.kickerId !== null && aim.kickerId === this.kickOwnerFor(human)) return true;
+    }
+    return false;
+  }
+
+  isHoldingKick() {
+    for (const [human, drag] of this.aimInput.drags) {
+      if (drag.kickerId !== null && drag.kickerId === this.kickOwnerFor(human)) return true;
     }
     return false;
   }
@@ -687,7 +705,7 @@ export class App {
     if (this.isAim) {
       const liveDt = this.screen === SCREEN.MATCH ? dtReal : 0;
       this.updatePossessionFeedback(liveDt);
-      this.layout.aiming = this.aimInput.hasGesture;
+      this.layout.aiming = this.isHoldingKick();
       this.layout.viewAttackDir = this.viewAttackDir();
       const view = (this.renderState ??= new RenderState()).view(this.match, this.accumulator / PHYSICS.dt);
       const controlledIds = new Set();
@@ -701,10 +719,16 @@ export class App {
         }
         const state = this.aimInput.aimState(i);
         if (state && state.active && state.kickerId === this.kickOwnerFor(i) && this.match.canKick(i)) {
+          const path = state.path ? anchorToBall(state.path, view.ball.pos) : null;
+          const target = path && this.match.shotTargetFromPath(this.match.getPlayer(state.kickerId), path, this.match.setPiece?.kind);
+          const shot = state.shot || (target ? { target, power: 0.8 } : null);
           aims.push({
             ...state,
+            kicker: view.getPlayer(state.kickerId),
             from: view.ball.pos,
-            path: state.path ? anchorToBall(state.path, view.ball.pos) : null,
+            path,
+            shot,
+            power: shot?.power ?? state.power,
             colour: i === 0 ? '#ffe600' : '#00e5ff',
           });
         }
@@ -735,6 +759,14 @@ export class App {
           this.renderer3d.drawFloats(hud, this.layout, dt);
         }
         this.suggestionMarkers = [];
+        const highlightedGoals = new Set();
+        for (let human = 0; human < this.match.humanInputs.length; human++) {
+          const goal = this.match.shootingGoal(human);
+          if (goal && !highlightedGoals.has(goal.x)) {
+            this.renderer3d.drawShootingGoal(hud, goal);
+            highlightedGoals.add(goal.x);
+          }
+        }
         for (let human = 0; human < this.match.humanInputs.length; human++) {
           const suggestion = this.match.suggestedTarget(human);
           if (suggestion) {
@@ -776,6 +808,7 @@ export class App {
     const m = this.match;
     if (m.state === STATES.GOAL) return null;
     if (m.canKick(0)) {
+      if (m.shootingGoal(0)) return 'Tap the net to shoot · drag to place your shot';
       if (m.state !== STATES.PLAY) return 'Draw or tap the tick';
       if (m.isCarryingRun(0)) return 'Running · draw to pass or shoot';
       if (m.suggestedRun(0)) return 'Tap green RUN · draw or tap ✓ to kick';

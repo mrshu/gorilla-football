@@ -3,8 +3,9 @@
 // stadium view rather than a diagram. Still plain canvas 2D and still
 // generated geometry: no models, no textures, no dependencies.
 
-import { PITCH, STATES } from '../game/constants.js';
+import { PITCH, PHYSICS, STATES } from '../game/constants.js';
 import { clamp } from '../game/vec.js';
+import { planShot } from '../game/shooting.js';
 import { Camera, frameSideline, frameFirstPerson, sidelinePose, shootingPose, isInShootingRange, applyPose, blendPose, keepBallInFrame } from './camera.js';
 
 const SKY_TOP = '#101429';
@@ -35,7 +36,7 @@ function markerBounds(camera, layout, human) {
 }
 
 export function suggestionMarker(camera, suggestion, layout = null, human = 0) {
-  const point = { ...suggestion.point, z: 1.4 };
+  const point = { ...suggestion.point, z: suggestion.kind === 'shot' ? suggestion.point.z ?? 1.4 : 1.4 };
   const screen = camera.project(point);
   const { left, right, top, bottom } = markerBounds(camera, layout, human);
   const cx = (left + right) / 2;
@@ -626,6 +627,11 @@ export class Renderer3D {
     const aim = opts.aim;
     if (!aim || !aim.active) return;
     const colour = aim.colour || '#ffe600';
+    if (aim.shot) {
+      this.drawShotAim(ctx, aim, colour);
+      this.drawPowerRing(ctx, aim, colour);
+      return;
+    }
     if (aim.path && aim.path.length >= 2) {
       this.drawDrawnPath(ctx, aim.path, colour);
       this.drawPowerRing(ctx, aim, colour);
@@ -663,6 +669,68 @@ export class Renderer3D {
     }
     ctx.restore();
     this.drawPowerRing(ctx, aim, colour);
+  }
+
+  drawShootingGoal(ctx, goal) {
+    const half = PITCH.goalWidth / 2;
+    const corners = [
+      { ...goal, y: goal.y - half, z: 0.1 }, { ...goal, y: goal.y - half, z: PITCH.goalHeight },
+      { ...goal, y: goal.y + half, z: PITCH.goalHeight }, { ...goal, y: goal.y + half, z: 0.1 },
+    ].map(p => this.camera.project(p));
+    if (corners.some(p => !p.visible)) return;
+    ctx.save();
+    ctx.beginPath();
+    corners.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255,190,95,0.07)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,209,122,0.65)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.setLineDash([3, 6]);
+    ctx.strokeStyle = 'rgba(255,209,122,0.3)';
+    for (const y of [goal.y - half / 3, goal.y + half / 3]) {
+      const a = this.camera.project({ ...goal, y, z: 0.1 });
+      const b = this.camera.project({ ...goal, y, z: PITCH.goalHeight });
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  drawShotAim(ctx, aim, colour) {
+    const plan = planShot(aim.kicker, aim.shot.target, aim.shot.power);
+    if (!plan) return;
+    const offset = PHYSICS.playerRadius + PHYSICS.ballRadius + 0.1;
+    const start = { x: aim.kicker.pos.x + plan.dir.x * offset, y: aim.kicker.pos.y + plan.dir.y * offset };
+    const dt = PHYSICS.dt;
+    const retention = 1 - PHYSICS.ballAirDrag * dt;
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i <= 30; i++) {
+      const t = plan.travelTime * i / 30;
+      const steps = Math.floor(t / dt);
+      const fraction = t / dt - steps;
+      const distance = plan.speed * dt * retention * (1 - retention ** steps) / (1 - retention)
+        + fraction * plan.speed * dt * retention ** (steps + 1);
+      const z = 0.05 + plan.vz * t - PHYSICS.gravity * dt * dt
+        * (steps * (steps + 1) / 2 + fraction * (steps + 1));
+      const p = this.camera.project({ x: start.x + plan.dir.x * distance, y: start.y + plan.dir.y * distance, z });
+      if (!p.visible) continue;
+      if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+    }
+    ctx.strokeStyle = 'rgba(10,18,26,0.7)'; ctx.lineWidth = 6; ctx.stroke();
+    ctx.strokeStyle = colour; ctx.lineWidth = 3; ctx.stroke();
+    const point = this.camera.project(plan.target);
+    if (point.visible) {
+      ctx.beginPath(); ctx.arc(point.x, point.y, 12, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(12,18,30,0.65)'; ctx.fill();
+      ctx.strokeStyle = colour; ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(point.x - 18, point.y); ctx.lineTo(point.x + 18, point.y);
+      ctx.moveTo(point.x, point.y - 18); ctx.lineTo(point.x, point.y + 18);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // The finger's stroke, laid on the grass. Its endpoint sets the kick and
@@ -731,6 +799,7 @@ export class Renderer3D {
     }
     if (owner && !selected.has(owner.id)) selected.set(owner.id, { player: owner, humans: [] });
     for (const { player, humans } of selected.values()) {
+      if (layout.firstPerson && layout.eyePlayer?.id === player.id) continue;
       const foot = this.camera.project({ ...player.pos, z: 0.06 });
       if (!foot.visible) continue;
       const carrier = player.id === owner?.id;

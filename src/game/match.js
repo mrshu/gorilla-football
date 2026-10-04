@@ -11,6 +11,7 @@ import { getAbility } from './abilities.js';
 import { updateOutfieldAI, chooseAiSetPieceAction, homePosition } from './ai.js';
 import { updateGoalkeeper, goalkeeperDistribute } from './goalkeeper.js';
 import { findOpenRun } from './dribble.js';
+import { planShot } from './shooting.js';
 
 const HALF_W = PITCH.width / 2;
 
@@ -453,7 +454,7 @@ export class Match {
     if (waited > TIMING.setPieceAiDelay) this.takeSetPiece(taker, 'auto', null);
   }
 
-  takeSetPiece(taker, mode, aim, { target: explicitTarget = null, humanIndex } = {}) {
+  takeSetPiece(taker, mode, aim, { target: explicitTarget = null, shotTarget = null, shotPower = 0.8, humanIndex } = {}) {
     const sp = this.setPiece;
     const kind = sp.kind;
     this.state = STATES.PLAY;
@@ -473,7 +474,8 @@ export class Match {
 
     if (action === 'shoot') {
       const aimY = aim ? clamp(aim.y, -1, 1) : this.rng.range(-0.7, 0.7);
-      this.shoot(taker, aimY, { noOffside: exempt, force: true, humanIndex: focusHuman });
+      if (shotTarget) this.shootAt(taker, shotTarget, shotPower, { noOffside: exempt, humanIndex: focusHuman });
+      else this.shoot(taker, aimY, { noOffside: exempt, force: true, humanIndex: focusHuman });
     } else {
       const target = explicitTarget || this.choosePassTarget(taker, aim, { setPiece: kind });
       if (target) this.passTo(taker, target, { noOffside: exempt, loft: kind === SET_PIECES.CORNER || kind === SET_PIECES.GOAL_KICK, humanIndex: focusHuman });
@@ -618,6 +620,41 @@ export class Match {
     return true;
   }
 
+  shootingGoal(humanIndex) {
+    if (!Number.isInteger(humanIndex) || !this.config.humans[humanIndex]
+        || !this.canKick(humanIndex)) return null;
+    if (this.setPiece && ![SET_PIECES.PENALTY, SET_PIECES.FREE_KICK].includes(this.setPiece.kind)) return null;
+    const kicker = this.getPlayer(this.setPiece?.takerId ?? this.ball.owner);
+    if (!kicker || kicker.isGK || kicker.sentOff || kicker.stun > 0 || kicker.frozen > 0) return null;
+    const ad = this.teams[kicker.team].attackDir;
+    const goal = goalCenter(ad);
+    return (goal.x - kicker.pos.x) * ad > 0 && dist(kicker.pos, goal) <= 38 ? goal : null;
+  }
+
+  // Snapshot identity as well as placement: neither a stolen ball nor a new
+  // restart may turn a released shot into a kick by a different player.
+  aimShot(humanIndex, target, power = 0.8) {
+    const goal = this.shootingGoal(humanIndex);
+    if (!goal || ![target?.x, target?.y, target?.z, power].every(Number.isFinite)
+        || Math.abs(target.x - goal.x) > 0.01
+        || Math.abs(target.y - goal.y) > PITCH.goalWidth / 2
+        || target.z < 0 || target.z > PITCH.goalHeight) return false;
+    this.aimKicks[humanIndex] = { shot: { target: { ...target }, power: clamp(power, 0, 1) },
+      kickerId: this.setPiece?.takerId ?? this.ball.owner, restart: this.setPiece };
+    return true;
+  }
+
+  suggestedShotPoint(kicker) {
+    const goal = goalCenter(this.teams[kicker.team].attackDir);
+    const keeper = this.opponentsOf(kicker).find(p => p.isGK);
+    const corners = [-2.25, 2.25, 0].map(offset => ({ ...goal, y: goal.y + offset, z: 0.75 }));
+    return corners.sort((a, b) => {
+      const score = target => (this.laneIsClear(kicker, target) ? 100 : 0)
+        + (keeper ? Math.abs(target.y - keeper.pos.y) : Math.abs(target.y - goal.y));
+      return score(b) - score(a);
+    })[0];
+  }
+
   // Play the displayed marker as its named pass or shot. Keep the carrier
   // and receiver identities so a stale marker never kicks for another player.
   playSuggestion(humanIndex, suggestion) {
@@ -690,7 +727,7 @@ export class Match {
     const best = ranked.length ? ranked[0] : null;
 
     // If there is a clear sight of goal from close in, that beats any pass.
-    const goal = this.goalTargetFor(carrier);
+    const goal = this.suggestedShotPoint(carrier);
     const dGoal = dist(carrier.pos, goal);
     const identity = { kickerId: carrier.id, setPieceKind: setPiece ?? null };
     if (setPiece === SET_PIECES.PENALTY || (dGoal < 18 + carrier.stats.shotPower && this.laneIsClear(carrier, goal))) {
@@ -799,14 +836,17 @@ export class Match {
       const kick = this.aimKicks[i];
       this.aimKicks[i] = null;
       if (!kick || !this.canKick(i)) continue;
+      if (kick.shot && (kick.kickerId !== (this.setPiece?.takerId ?? this.ball.owner)
+          || kick.restart !== this.setPiece || !this.shootingGoal(i))) continue;
       if (kick.suggestion) {
         const action = suggestionAction(this, i, kick.suggestion);
         if (!action || this.setPiece !== kick.restart) continue;
         const { kicker, target, aimY } = action;
         if (this.setPiece) {
-          this.takeSetPiece(kicker, kick.suggestion.kind === 'shot' ? 'shoot' : 'pass', { x: 0, y: aimY }, { target, humanIndex: i });
+          this.takeSetPiece(kicker, kick.suggestion.kind === 'shot' ? 'shoot' : 'pass', { x: 0, y: aimY },
+            { target, shotTarget: target ? null : kick.suggestion.point, humanIndex: i });
         } else if (target) this.passTo(kicker, target, { humanIndex: i });
-        else this.shoot(kicker, aimY, { humanIndex: i });
+        else this.shootAt(kicker, kick.suggestion.point, 0.8, { humanIndex: i });
         continue;
       }
       const teamIndex = this.config.humans[i]?.team ?? 0;
@@ -862,6 +902,11 @@ export class Match {
   // One kick covers passing and shooting: the ball simply goes where it is
   // aimed, as hard as it was hit.
   playBall(kicker, kick, { setPieceKind = null, humanIndex } = {}) {
+    if (kick.shot) {
+      if (setPieceKind) return this.takeSetPiece(kicker, 'shoot', null,
+        { shotTarget: kick.shot.target, shotPower: kick.shot.power, humanIndex });
+      return this.shootAt(kicker, kick.shot.target, kick.shot.power, { humanIndex });
+    }
     if (kick.path) return this.playBallAlongPath(kicker, kick.path, { setPieceKind, humanIndex });
     const { dir, power } = kick;
     const speed = AIM.minSpeed + power * (kicker.phys.shotSpeed - AIM.minSpeed);
@@ -937,12 +982,19 @@ export class Match {
 
   playBallAlongPath(kicker, drawn, { setPieceKind = null, humanIndex } = {}) {
     const plan = this.planKick(kicker, drawn);
+    const placedShot = this.shotTargetFromPath(kicker, drawn, setPieceKind);
+    if (placedShot) {
+      const target = placedShot;
+      if (setPieceKind) return this.takeSetPiece(kicker, 'shoot', null, { shotTarget: target, humanIndex });
+      return this.shootAt(kicker, target, 0.8, { humanIndex });
+    }
     // Aim is not perfect: a harder kick and a weaker striker stray more.
     const effort = plan.speed / Math.max(1, kicker.phys.shotSpeed);
     const spread = (AIM.baseSpread + effort * AIM.powerSpread) * (0.55 + kicker.phys.shotSpread);
     const dir = fromAngle(angle(plan.dir) + this.rng.gaussian() * spread * this.mathsAccuracyScale(kicker, humanIndex));
     const speed = plan.speed;
     const target = plan.target;
+    const goal = goalCenter(this.teams[kicker.team].attackDir);
 
     if (setPieceKind) {
       this.state = STATES.PLAY;
@@ -951,8 +1003,8 @@ export class Match {
       this.ball.pos = { ...sp.pos };
       kicker.kickCooldown = 0;
     }
-    const goal = goalCenter(this.teams[kicker.team].attackDir);
-    const towardsGoal = dist(target, goal) < 7 && dist(kicker.pos, goal) < 46;
+    const towardsGoal = dist(target, goal) < 7 && dist(kicker.pos, goal) < 46
+      && (target.x - goal.x) * this.teams[kicker.team].attackDir >= -0.35;
     if (towardsGoal) {
       this.stats.shots[kicker.team]++;
       this.emit('shot', { playerId: kicker.id, team: kicker.team });
@@ -977,6 +1029,21 @@ export class Match {
     this.emit('kick', { playerId: kicker.id, kind: towardsGoal ? 'shot' : 'pass' });
     if (setPieceKind === SET_PIECES.KICKOFF) this.emit('kickoff', { team: kicker.team });
     if (setPieceKind) this.emit('whistle');
+  }
+
+  shotTargetFromPath(kicker, drawn, setPieceKind = null) {
+    if (setPieceKind && ![SET_PIECES.PENALTY, SET_PIECES.FREE_KICK].includes(setPieceKind)) return null;
+    const goal = goalCenter(this.teams[kicker.team].attackDir);
+    const target = anchorPath(drawn, this.ball.pos).at(-1);
+    if (!target) return null;
+    const ad = this.teams[kicker.team].attackDir;
+    const along = (target.x - kicker.pos.x) * ad;
+    const toLine = (goal.x - kicker.pos.x) * ad;
+    if (toLine <= 0 || dist(kicker.pos, goal) > 38 || along < toLine - 0.35 || along <= 0) return null;
+    const y = kicker.pos.y + (target.y - kicker.pos.y) * toLine / along;
+    if (Math.abs(y - goal.y) > PITCH.goalWidth / 2 + 0.4) return null;
+    return { ...goal, y: clamp(y, goal.y - PITCH.goalWidth / 2 + 0.35,
+      goal.y + PITCH.goalWidth / 2 - 0.35), z: 0.65 };
   }
 
   pressWithNearest(humanIndex) {
@@ -1209,7 +1276,16 @@ export class Match {
       if (p.sentOff || p.frozen > 0 || p.stun > 0) continue;
       if (p.kickCooldown > 0) continue;
       const d = dist(p.pos, ball.pos);
-      const reach = p.isGK ? PHYSICS.controlRadius + 0.1 : PHYSICS.controlRadius + (p.sliding > 0 ? 0.5 : 0);
+      let reach = PHYSICS.controlRadius + (p.sliding > 0 ? 0.5 : 0);
+      if (p.isGK) {
+        // Hands at full stretch cannot also cover the same lateral distance
+        // as a waist-high save. Before reacting, only a body block is ready.
+        const height = Math.max(0, (ball.z - 1) / 1.3);
+        const handReach = (PHYSICS.controlRadius + 0.1) * Math.sqrt(Math.max(0, 1 - height * height));
+        const bodyReach = PHYSICS.playerRadius + PHYSICS.ballRadius;
+        reach = Math.max(bodyReach, handReach);
+        if (p.ai.sawShot && p.reactTimer > 0 && ball.lastTouchTeam !== p.team && len(ball.vel) > 8) reach = bodyReach;
+      }
       if (d > reach || ball.z > (p.isGK ? 2.3 : 1.7)) continue;
       if (ball.homing) {
         if (ball.homing.playerId !== p.id) continue;
@@ -1412,6 +1488,17 @@ export class Match {
     this.stats.shots[p.team]++;
     this.kick(p, dir, speed, { ...opts, vz, kind: 'shot' });
     this.emit('shot', { playerId: p.id, team: p.team });
+  }
+
+  shootAt(p, target, power = 0.8, opts = {}) {
+    const plan = planShot(p, target, power);
+    if (!plan) return false;
+    const spread = p.phys.shotSpread * 0.45 * (0.75 + clamp(power, 0, 1) * 0.25);
+    const dir = fromAngle(angle(plan.dir) + this.rng.gaussian() * spread * this.mathsAccuracyScale(p, opts.humanIndex));
+    this.stats.shots[p.team]++;
+    this.kick(p, dir, plan.speed, { ...opts, vz: plan.vz, kind: 'shot' });
+    this.emit('shot', { playerId: p.id, team: p.team });
+    return true;
   }
 
   // Ability helper: launch a homing ball. opts: {point} | {playerId}, speed, unstoppable, kind, assistFinish
@@ -1876,11 +1963,14 @@ function suggestionAction(match, humanIndex, suggestion) {
       .find((r) => r.player.id === suggestion.playerId)?.player;
     return target && target.stun <= 0 && target.frozen <= 0 ? { kicker, target, aimY: 0 } : null;
   }
-  const goal = match.goalTargetFor(kicker);
-  if (suggestion.playerId !== null || dist(suggestion.point, goal) > 1e-6) return null;
+  const goal = goalCenter(match.teams[kicker.team].attackDir);
+  if (suggestion.playerId !== null || Math.abs(suggestion.point.x - goal.x) > 0.01
+      || Math.abs(suggestion.point.y - goal.y) > PITCH.goalWidth / 2 - PHYSICS.ballRadius
+      || !Number.isFinite(suggestion.point.z) || suggestion.point.z < PHYSICS.ballRadius
+      || suggestion.point.z > PITCH.goalHeight - PHYSICS.ballRadius) return null;
   if (match.setPiece?.kind !== SET_PIECES.PENALTY
-      && (dist(kicker.pos, goal) >= 18 + kicker.stats.shotPower || !match.laneIsClear(kicker, goal))) return null;
-  return { kicker, target: null, aimY: 0 };
+      && (dist(kicker.pos, suggestion.point) >= 18 + kicker.stats.shotPower || !match.laneIsClear(kicker, suggestion.point))) return null;
+  return { kicker, target: null, aimY: (suggestion.point.y - goal.y) / (PITCH.goalWidth / 2 - 0.6) };
 }
 
 // Drop near-duplicates and keep the real release point. Resample long strokes

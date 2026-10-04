@@ -130,6 +130,7 @@ function drawAimControls(ctx, match, layout, notices) {
     const colour = human === 0 ? COLOUR.gold : COLOUR.teal;
     const x = human === 0 ? 8 : layout.w - badgeW - 8;
     const mode = owner?.id === player.id ? (match.isCarryingRun?.(human) ? 'Running · draw to pass or shoot'
+      : match.shootingGoal?.(human) ? (match.hasMathsFocus?.(human) ? 'Focused shot · tap the net' : 'Tap the net · drag to place a shot')
       : match.hasMathsFocus?.(human) ? 'Focused kick · draw or tap ✓'
       : match.state === STATES.PLAY && !player.isGK ? 'Slow play · draw or tap ✓' : 'Draw or tap ✓ to kick')
       : owner && owner.team !== player.team ? 'Defending · tap to press'
