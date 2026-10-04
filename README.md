@@ -4,6 +4,9 @@ A mobile-first 11-a-side arcade football game for one or two players on a
 single phone or tablet, played from a 3D stadium camera. ES modules with no
 build step and nothing to install.
 
+Play online at <https://mrshu.github.io/gorilla-football/>. Pushes to `main`
+run the gameplay tests and deploy the static game through GitHub Pages.
+
 Rendering has two paths. By default it loads three.js from a CDN and renders
 the match in WebGL, with real lighting, shadows and a textured pitch. If that
 script cannot be reached, which is the point of serving the game off your own
