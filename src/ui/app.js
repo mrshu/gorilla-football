@@ -801,13 +801,21 @@ function safeStorage() {
   try { return globalThis.localStorage; } catch { return null; }
 }
 
-function loadSetup() {
-  const base = defaultConfig();
+export function loadSetup(storage = safeStorage()) {
+  const base = { ...defaultConfig(), mathsDefaultVersion: 1 };
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const raw = storage?.getItem(STORE_KEY);
     if (raw) {
       const saved = JSON.parse(raw);
-      return { ...base, ...saved, teams: saved.teams || base.teams, humans: saved.humans || base.humans };
+      const humans = base.humans.map((human, index) => {
+        const restored = { ...human, ...saved.humans?.[index] };
+        // Enable the former default once; later explicit Off choices survive.
+        if (saved.mathsDefaultVersion !== base.mathsDefaultVersion
+            && Number(restored.mathsBand) === 0) restored.mathsBand = human.mathsBand;
+        return restored;
+      });
+      return { ...base, ...saved, teams: saved.teams || base.teams, humans,
+        mathsDefaultVersion: base.mathsDefaultVersion };
     }
   } catch {
     /* ignore corrupt storage */

@@ -101,7 +101,7 @@ export function showHowTo(root, onBack) {
     <p><b>Keyboard (desktop):</b> P1 = WASD + J / K / L. P2 = arrow keys + 1 / 2 / 3. Esc pauses.</p>
     <p>Two-player matches give each person their own joystick and buttons so two people can hold the same device.</p>
     <h4>Optional maths practice</h4>
-    <p>Choose a starting age for each player before kickoff. Occasional questions pause play during attacking possession. You can always skip; wrong answers reveal the answer and cost no turn.</p>
+    <p>Maths starts on with counting. Choose a starting age for each player or switch it off before kickoff. Occasional questions pause play during attacking possession. You can always skip; wrong answers reveal the answer and cost no turn.</p>
     <p>A correct answer saves one <b>Focused kick</b> for your next pass or shot. It stays ready when you lose the ball. Specials and dribbling keep it ready; the bonus improves accuracy without changing speed, loft or curl.</p>
     <p>Difficulty adapts to each player's answers and progress stays on this device. Switching maths off retains that progress; selecting a different starting age starts that player's practice afresh.</p>
   `));

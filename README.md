@@ -194,8 +194,10 @@ In whole-team play, `L` and `3` activate player one's and player two's special.
 
 ## Maths practice
 
-Optional maths practice is selected per player in setup. Choose a starting age
-(5 to 16+) or leave it off for ordinary football. The question engine is ported
+Maths practice is enabled by default for each player, starting with counting
+(age 5). Choose another starting age (up to 16+) or switch it off in setup.
+Older saved setups with maths off are enabled once; existing age selections
+are preserved, and subsequent Off choices stay off. The question engine is ported
 from `football-puck-chaos` as a self-contained ES module: all eleven bands,
 adaptive difficulty, mastery, plausible choices and proportional diagrams.
 The setup summary and match badges show whether practice is enabled. Use

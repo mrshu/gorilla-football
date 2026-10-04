@@ -6,11 +6,13 @@ import { Match } from '../src/game/match.js';
 import { normalizeConfig } from '../src/game/config.js';
 import { STATES, SET_PIECES } from '../src/game/constants.js';
 
-test('setup normalizes independent maths bands and keeps existing football-only configs off', () => {
-  assert.equal(normalizeConfig({}).humans[0].mathsBand, 0);
+test('setup enables counting by default and respects independent maths selections', () => {
+  assert.deepEqual(normalizeConfig({ mode: 'versus' }).humans.map(human => human.mathsBand), [1, 1]);
+  assert.equal(normalizeConfig({ humans: [{}] }).humans[0].mathsBand, 1);
+  assert.equal(normalizeConfig({ humans: [{ mathsBand: 0 }] }).humans[0].mathsBand, 0);
   const cfg = normalizeConfig({ mode: 'versus', humans: [{ mathsBand: 1 }, { mathsBand: 11 }] });
   assert.deepEqual(cfg.humans.map(human => human.mathsBand), [1, 11]);
-  for (const mathsBand of [-1, 12, 2.5, 'invalid', undefined]) {
+  for (const mathsBand of [-1, 12, 2.5, 'invalid']) {
     assert.equal(normalizeConfig({ humans: [{ mathsBand }] }).humans[0].mathsBand, 0);
   }
 });

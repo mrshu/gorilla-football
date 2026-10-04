@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { App } from '../src/ui/app.js';
+import { App, loadSetup } from '../src/ui/app.js';
 import { AimInput } from '../src/ui/aiminput.js';
 import { Camera } from '../src/ui/camera.js';
 import { RenderState } from '../src/ui/render-state.js';
@@ -8,6 +8,20 @@ import { Match } from '../src/game/match.js';
 import { normalizeConfig, CONTROL, MODES, VIEW } from '../src/game/config.js';
 import { STATES, SET_PIECES, PITCH } from '../src/game/constants.js';
 import { Renderer3D } from '../src/ui/renderer3d.js';
+
+test('fresh and older saved setups enable maths without losing chosen ages', () => {
+  assert.deepEqual(loadSetup(null).humans.map(h => h.mathsBand), [1, 1]);
+  const saved = { mode: 'versus', humans: [
+    { characterId: 'wizard', mathsBand: 0 }, { characterId: 'plumber', mathsBand: 6 },
+  ] };
+  const restored = loadSetup({ getItem: () => JSON.stringify(saved) });
+  assert.equal(restored.mode, 'versus');
+  assert.equal(restored.humans[0].characterId, 'wizard');
+  assert.deepEqual(restored.humans.map(h => h.mathsBand), [1, 6]);
+  restored.humans[0].mathsBand = 0;
+  const reloaded = loadSetup({ getItem: () => JSON.stringify(restored) });
+  assert.deepEqual(reloaded.humans.map(h => h.mathsBand), [0, 6]);
+});
 
 function harness({ control = CONTROL.AIM, mode = MODES.SOLO } = {}) {
   const app = Object.create(App.prototype);

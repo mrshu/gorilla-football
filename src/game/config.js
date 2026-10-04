@@ -20,6 +20,7 @@ export const MODE_INFO = [
 
 export const DURATION_OPTIONS = [1, 2, 3, 5, 8, 10, 15];
 export const DEFAULT_DURATION_MINUTES = 5;
+export const DEFAULT_MATHS_BAND = 1;
 
 // How a human plays.
 //   AIM:      you run the whole team. Everyone moves themselves; you hold,
@@ -69,8 +70,8 @@ export function defaultConfig() {
       { presetId: TEAM_PRESETS[1].id, jerseyId: TEAM_PRESETS[1].defaultJersey },
     ],
     humans: [
-      { characterId: 'gorilla', mathsBand: 0 },
-      { characterId: 'plumber', mathsBand: 0 },
+      { characterId: 'gorilla', mathsBand: DEFAULT_MATHS_BAND },
+      { characterId: 'plumber', mathsBand: DEFAULT_MATHS_BAND },
     ],
   };
 }
@@ -108,7 +109,7 @@ export function normalizeConfig(input) {
     getCharacter(characterId);
     const team = humanTeamIndex(cfg.mode, i);
     const slot = cfg.mode === MODES.COOP ? HUMAN_SLOTS[i] : HUMAN_SLOTS[0];
-    const band = Number(h.mathsBand);
+    const band = Number(h.mathsBand ?? DEFAULT_MATHS_BAND);
     const mathsBand = Number.isInteger(band) && band >= 0 && band <= 11 ? band : 0;
     humans.push({ index: i, team, slot, characterId, mathsBand });
     teams[team].roster[slot] = characterId;
