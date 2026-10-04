@@ -83,6 +83,101 @@ test('clipped ticks render a labelled action and retain a generous hit target', 
   assert.deepEqual(labels, ['SHOOT', 'PASS']);
 });
 
+test('run markers draw a green arrow and RUN label in view, offscreen and behind the camera', () => {
+  const { camera, layout } = markerFixture();
+  for (const point of [{ x: 54, y: 34 }, { x: 105, y: 34 }, { x: 52, y: -40 }]) {
+    const r = renderer();
+    r.camera = camera;
+    const labels = [];
+    const fills = [];
+    const strokes = [];
+    const glows = [];
+    let path = [];
+    const ctx = new Proxy({
+      createRadialGradient: () => ({ addColorStop: (_, colour) => glows.push(colour) }),
+      fillText: (text) => labels.push(text),
+      fill() { fills.push(this.fillStyle); },
+      beginPath: () => { path = []; },
+      moveTo: (x, y) => path.push({ move: true, x, y }),
+      lineTo: (x, y) => path.push({ move: false, x, y }),
+      stroke() { strokes.push({ colour: this.strokeStyle, path: [...path] }); },
+    }, { get: (target, property) => target[property] || (() => {}) });
+    const run = Object.freeze({ kind: 'run', point: Object.freeze(point), playerId: null, kickerId: 7, setPieceKind: null });
+    const result = r.drawSuggestion(ctx, run, 0, layout, 0);
+    assert.deepEqual(labels, ['RUN']);
+    assert.ok(fills.includes('#78f0a0'), 'movement must use a green disc');
+    assert.ok(!fills.includes('#ffe33d') && !fills.includes('#ff8a3d'), 'run and kick markers must remain distinguishable');
+    assert.ok(glows.includes('rgba(95,245,144,0.55)'), 'the movement glow is green too');
+    const icon = strokes.find(s => s.colour === '#1b1b1b');
+    assert.equal(icon.path.filter(p => p.move).length, 2, 'run icon has an arrow shaft and head rather than a tick');
+    assert.ok(result.radius >= 24);
+    const expected = suggestionMarker(camera, run, layout, 0);
+    assert.equal(result.x, expected.x);
+    assert.equal(result.y, expected.y);
+    assert.equal(result.clipped, expected.clipped);
+    assert.deepEqual(result.direction, expected.direction);
+    assert.deepEqual(run, { kind: 'run', point, playerId: null, kickerId: 7, setPieceKind: null });
+  }
+});
+
+test('run and pass markers sharing an offscreen edge retain separate usable hit circles in their human zone', () => {
+  const arcs = [];
+  const ctx = new Proxy({ createRadialGradient: () => ({ addColorStop() {} }), arc: (x, y) => arcs.push({ x, y }) },
+    { get: (target, property) => target[property] || (() => {}) });
+  for (const [w, h] of [[320, 568], [390, 844], [844, 390]]) {
+    const { camera, layout } = markerFixture(w, h, 2);
+    const r = renderer();
+    r.camera = camera;
+    for (const human of [0, 1]) {
+      const point = Object.freeze({ x: 105, y: 34 });
+      const kick = r.drawSuggestion(ctx, { kind: 'pass', point }, 0, layout, human);
+      const run = Object.freeze({ kind: 'run', point, playerId: null, kickerId: 7, setPieceKind: null });
+      const avoided = Object.freeze({ ...kick });
+      const original = suggestionMarker(camera, run, layout, human);
+      assert.equal(original.x, kick.x);
+      assert.equal(original.y, kick.y);
+      arcs.length = 0;
+      const drawn = r.drawSuggestion(ctx, run, 0, layout, human, { avoid: [avoided] });
+      assert.ok(drawn, `${w}×${h} must have room for both actions`);
+      assert.ok(arcs.length > 0 && arcs.every(arc => arc.x === drawn.x && arc.y === drawn.y),
+        'hit coordinates must describe the actual painted marker');
+      assert.ok(Math.hypot(drawn.x - kick.x, drawn.y - kick.y) > drawn.radius + kick.radius + 5);
+      const zone = layout.zones[human];
+      assert.ok(drawn.x - drawn.radius >= zone.x && drawn.x + drawn.radius <= zone.x + zone.w);
+      assert.ok(drawn.y - drawn.radius >= Math.max(zone.y, 157));
+      assert.ok(drawn.y + 41 <= layout.specialButtons[human].y);
+      assert.deepEqual(avoided, kick, 'existing kick marker must remain unchanged');
+      assert.deepEqual(run.point, { x: 105, y: 34 }, 'spacing changes screen coordinates only');
+      assert.ok(drawn.direction.x > 0, 'the moved marker still points toward its world target');
+    }
+  }
+});
+
+test('a run marker is omitted without painting when its safe zone cannot fit beside an existing action', () => {
+  const { camera, layout } = markerFixture(72, 335);
+  const r = renderer();
+  r.camera = camera;
+  const point = { x: 105, y: 34 };
+  const occupied = { ...suggestionMarker(camera, { kind: 'pass', point }, layout), radius: 24 };
+  const ctx = new Proxy({}, { get() { throw new Error('an omitted marker must not draw'); } });
+  assert.equal(r.drawSuggestion(ctx, { kind: 'run', point }, 0, layout, 0, { avoid: [occupied] }), null);
+});
+
+test('noncolliding run markers keep their projection and kick markers ignore the new avoidance option', () => {
+  const { camera, layout } = markerFixture();
+  const r = renderer();
+  r.camera = camera;
+  const ctx = new Proxy({ createRadialGradient: () => ({ addColorStop() {} }) },
+    { get: (target, property) => target[property] || (() => {}) });
+  const run = { kind: 'run', point: { x: 54, y: 34 } };
+  const expected = r.drawSuggestion(ctx, run, 0, layout);
+  const actual = r.drawSuggestion(ctx, run, 0, layout, 0, { avoid: [{ x: 36, y: 193, radius: 24 }] });
+  assert.deepEqual(actual, expected);
+  const pass = { ...run, kind: 'pass' };
+  const kick = r.drawSuggestion(ctx, pass, 0, layout);
+  assert.deepEqual(r.drawSuggestion(ctx, pass, 0, layout, 0, { avoid: [kick] }), kick);
+});
+
 test('fast passes return from shot view continuously, stay visible, and settle without a handoff snap', () => {
   for (const portrait of [false, true]) {
     for (const attackDir of [-1, 1]) {

@@ -188,6 +188,76 @@ test('tapping a spot sends your player running to it', () => {
   assert.ok(after < before - 5, `player did not run to the spot: ${before.toFixed(1)} m to ${after.toFixed(1)} m`);
 });
 
+test('open-space run suggestions carry the ball without kicking or spending maths focus', () => {
+  const m = makeMatch();
+  m.state = STATES.PLAY;
+  m.setPiece = null;
+  const p = m.humanPlayer(0);
+  parkEveryoneElse(m, p);
+  p.pos = { x: 40, y: 34 };
+  giveBall(m, p);
+  assert.ok(m.grantMathsFocus(0, p.id));
+  const run = m.suggestedRun(0);
+  assert.equal(run.kind, 'run');
+  assert.ok(run.point.x > p.pos.x);
+  assert.equal(m.playRun(0, run), true);
+  assert.equal(m.ball.owner, p.id);
+  assert.equal(m.hasMathsFocus(0), true);
+  assert.equal(m.isCarryingRun(0), true);
+  assert.equal(m.suggestedRun(0), null, 'a committed run does not need another run marker');
+  const start = p.pos.x;
+  m.drainEvents();
+  for (let i = 0; i < 90; i++) m.step(PHYSICS.dt);
+  assert.ok(p.pos.x > start + 4, 'the chosen carry advances the footballer');
+  assert.equal(m.ball.owner, p.id);
+  assert.equal(m.hasMathsFocus(0), true);
+  assert.ok(!m.drainEvents().some(e => e.type === 'kick'));
+});
+
+test('captured run suggestions reject turnovers, new blockers and malformed destinations', () => {
+  for (const invalidate of [
+    (m, p) => { m.ball.owner = m.teams[0].players.find(o => o.id !== p.id && !o.isGK).id; },
+    (m, p) => { m.teams[1].players[6].pos = { x: p.pos.x + 2, y: p.pos.y }; },
+    (m, p, run) => { run.point.x = NaN; },
+    (m, p, run) => { run.point = { x: 1, y: 1 }; },
+    (m) => { m.state = STATES.GOAL; },
+  ]) {
+    const m = makeMatch();
+    m.state = STATES.PLAY;
+    m.setPiece = null;
+    const p = m.humanPlayer(0);
+    parkEveryoneElse(m, p);
+    p.pos = { x: 40, y: 34 };
+    giveBall(m, p);
+    const run = m.suggestedRun(0);
+    assert.ok(run);
+    invalidate(m, p, run);
+    assert.equal(m.playRun(0, run), false);
+    assert.equal(m.moveOrders[0], null);
+  }
+});
+
+test('a captured run uses the newly safe destination when a defender closes the old endpoint', () => {
+  const m = makeMatch();
+  m.state = STATES.PLAY;
+  m.setPiece = null;
+  const p = m.humanPlayer(0);
+  parkEveryoneElse(m, p);
+  p.pos = { x: 40, y: 34 };
+  giveBall(m, p);
+  const opponents = m.teams[1].players.slice(4, 7);
+  opponents[0].pos = { x: 55.9, y: 34 };
+  opponents[1].pos = { x: 48, y: 39 };
+  opponents[2].pos = { x: 48, y: 29 };
+  const captured = m.suggestedRun(0);
+  assert.deepEqual(captured.point, { x: 52, y: 34 });
+  opponents[0].pos.x = 55.5;
+  const fresh = m.suggestedRun(0);
+  assert.deepEqual(fresh.point, { x: 50, y: 34 });
+  assert.equal(m.playRun(0, captured), true);
+  assert.deepEqual(m.moveOrders[0].point, fresh.point);
+});
+
 test('a move order is dropped once the player gets there', () => {
   const m = makeMatch({ seed: 12 });
   intoPlay(m);

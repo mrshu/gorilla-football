@@ -10,6 +10,7 @@ import { classifyOutOfPlay, offsidePositions, offsideExemptSetPiece, resolveTack
 import { getAbility } from './abilities.js';
 import { updateOutfieldAI, chooseAiSetPieceAction, homePosition } from './ai.js';
 import { updateGoalkeeper, goalkeeperDistribute } from './goalkeeper.js';
+import { findOpenRun } from './dribble.js';
 
 const HALF_W = PITCH.width / 2;
 
@@ -657,6 +658,11 @@ export class Match {
     const theirs = carrier && carrier.team !== player.team;
     // Tapping right on top of an opponent with the ball means "get stuck in".
     if (theirs && dist(point, carrier.pos) < AIM.moveOrderRadius * 2) return this.press(humanIndex);
+    // Co-op shares a carrier: the latest destination replaces a partner's
+    // older order, so movement and decision pacing follow the same command.
+    for (let i = 0; i < this.moveOrders.length; i++) {
+      if (this.moveOrders[i]?.playerId === player.id) this.moveOrders[i] = null;
+    }
     this.moveOrders[humanIndex] = {
       playerId: player.id,
       point: {
@@ -692,6 +698,50 @@ export class Match {
     }
     if (!best) return null;
     return { kind: 'pass', point: { ...best.player.pos }, playerId: best.player.id, ...identity };
+  }
+
+  suggestedRun(humanIndex) {
+    if (!this.canDribble(humanIndex) || this.isCarryingRun(humanIndex)
+        || this.suggestedTarget(humanIndex)?.kind === 'shot') return null;
+    const carrier = this.getPlayer(this.ball.owner);
+    const point = findOpenRun(this, carrier);
+    return point ? { kind: 'run', point, playerId: null, kickerId: carrier.id, setPieceKind: null } : null;
+  }
+
+  playRun(humanIndex, suggestion) {
+    if (!Number.isInteger(humanIndex) || !this.config.humans[humanIndex]
+        || !this.canDribble(humanIndex) || suggestion?.kind !== 'run'
+        || suggestion.kickerId !== this.ball.owner || suggestion.setPieceKind !== null
+        || suggestion.playerId !== null || !Number.isFinite(suggestion.point?.x)
+        || !Number.isFinite(suggestion.point?.y)) return false;
+    const carrier = this.getPlayer(this.ball.owner);
+    const safe = findOpenRun(this, carrier);
+    // A captured marker cannot send a new carrier into a newly blocked lane.
+    if (!safe || dist(safe, suggestion.point) > 2) return false;
+    return this.tap(humanIndex, safe);
+  }
+
+  // A chosen carry runs in real time until its destination or nearby pressure
+  // calls for another decision. This changes pacing, never speed or tackling.
+  isCarryingRun(humanIndex) {
+    if (!this.canDribble(humanIndex)) return false;
+    const carrier = this.getPlayer(this.ball.owner);
+    const order = this.moveOrders.find((order) => order?.playerId === carrier.id);
+    if (!order || order.playerId !== carrier.id || !Number.isFinite(order.point?.x)
+        || !Number.isFinite(order.point?.y)) return false;
+    const to = sub(order.point, carrier.pos);
+    const distance = len(to);
+    if (distance <= AIM.moveOrderRadius) return false;
+    const dir = scale(to, 1 / distance);
+    const ahead = Math.min(distance, 4);
+    for (const opponent of this.opponentsOf(carrier)) {
+      const rel = sub(opponent.pos, carrier.pos);
+      if (len(rel) < 3) return false;
+      const along = dot(rel, dir);
+      const sideways = Math.abs(rel.x * dir.y - rel.y * dir.x);
+      if (along > 0 && along < ahead + 1 && sideways < 2.5) return false;
+    }
+    return true;
   }
 
   // Is there a clear run from this player to that point?
@@ -732,7 +782,8 @@ export class Match {
     if (!this.aimControl || this.state !== STATES.PLAY) return false;
     const teamIndex = this.config.humans[humanIndex]?.team ?? 0;
     const owner = this.ball.owner !== null ? this.getPlayer(this.ball.owner) : null;
-    return Boolean(owner && owner.team === teamIndex && owner.kickCooldown <= 0 && !owner.isGK);
+    return Boolean(owner && owner.team === teamIndex && owner.kickCooldown <= 0 && !owner.isGK
+      && !owner.sentOff && owner.stun <= 0 && owner.frozen <= 0 && owner.sliding <= 0);
   }
 
   press(humanIndex) {

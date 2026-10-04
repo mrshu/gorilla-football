@@ -23,9 +23,7 @@ function hash2(a, b) {
 
 // The tick accepts the same world action even when its receiver or goal is
 // outside the close camera. Keep its touch target inside its owner's zone.
-export function suggestionMarker(camera, suggestion, layout = null, human = 0) {
-  const point = { ...suggestion.point, z: 1.4 };
-  const screen = camera.project(point);
+function markerBounds(camera, layout, human) {
   const { w, h } = layout || camera.viewport;
   const zone = layout?.zones?.[human] || { x: 0, y: 44, w, h: h - 44 };
   const hudBottom = layout?.hud ? layout.hud.y + layout.hud.h : 44;
@@ -33,6 +31,13 @@ export function suggestionMarker(camera, suggestion, layout = null, human = 0) {
   const right = Math.max(left, zone.x + zone.w - 36);
   const bottom = zone.y + zone.h - (zone.y + zone.h >= h - 1 ? 142 : 110);
   const top = Math.min(bottom, Math.max(zone.y + 36, hudBottom + 24 + 60 + 29 + 36));
+  return { left, right, top, bottom };
+}
+
+export function suggestionMarker(camera, suggestion, layout = null, human = 0) {
+  const point = { ...suggestion.point, z: 1.4 };
+  const screen = camera.project(point);
+  const { left, right, top, bottom } = markerBounds(camera, layout, human);
   const cx = (left + right) / 2;
   const cy = (top + bottom) / 2;
   const clipped = !screen.visible || screen.x < left || screen.x > right || screen.y < top || screen.y > bottom;
@@ -53,6 +58,40 @@ export function suggestionMarker(camera, suggestion, layout = null, human = 0) {
   const reach = Math.min(direction.x ? (right - left) / 2 / Math.abs(direction.x) : Infinity,
     direction.y ? (bottom - top) / 2 / Math.abs(direction.y) : Infinity);
   return { ...screen, x: cx + direction.x * reach, y: cy + direction.y * reach, clipped: true, direction };
+}
+
+function separateRunMarker(camera, suggestion, marker, layout, human, radius, avoid) {
+  const obstacles = avoid.filter(m => Number.isFinite(m?.x) && Number.isFinite(m?.y)
+    && Number.isFinite(m?.radius) && m.radius > 0);
+  const { left, right, top, bottom } = markerBounds(camera, layout, human);
+  const fits = point => obstacles.every(m => Math.hypot(point.x - m.x, point.y - m.y) >= radius + m.radius + 6);
+  if (fits(marker)) return marker;
+  // Sample around the occupied circles and along the safe edges. Prefer the
+  // nearest free position so two suggestions do not change places needlessly.
+  const candidates = [
+    { x: left, y: top }, { x: right, y: top }, { x: left, y: bottom }, { x: right, y: bottom },
+  ];
+  for (const obstacle of obstacles) {
+    const distance = radius + obstacle.radius + 6.01;
+    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 16) {
+      candidates.push({
+        x: clamp(obstacle.x + Math.cos(angle) * distance, left, right),
+        y: clamp(obstacle.y + Math.sin(angle) * distance, top, bottom),
+      });
+    }
+  }
+  const point = candidates.filter(fits).sort((a, b) => Math.hypot(a.x - marker.x, a.y - marker.y)
+    - Math.hypot(b.x - marker.x, b.y - marker.y))[0];
+  if (!point) return null;
+  let direction = marker.direction;
+  const projected = camera.project({ ...suggestion.point, z: 1.4 });
+  if (projected.visible) {
+    const dx = projected.x - point.x;
+    const dy = projected.y - point.y;
+    const distance = Math.hypot(dx, dy) || 1;
+    direction = { x: dx / distance, y: dy / distance };
+  }
+  return { ...marker, ...point, clipped: true, direction };
 }
 
 export class Renderer3D {
@@ -744,58 +783,76 @@ export class Renderer3D {
     ctx.restore();
   }
 
-  drawSuggestion(ctx, suggestion, dt, layout = null, human = 0) {
+  drawSuggestion(ctx, suggestion, dt, layout = null, human = 0, { avoid = [] } = {}) {
     if (!suggestion) return;
-    const s = suggestionMarker(this.camera, suggestion, layout, human);
+    let s = suggestionMarker(this.camera, suggestion, layout, human);
+    const run = suggestion.kind === 'run';
+    const colour = run ? '#78f0a0' : suggestion.kind === 'shot' ? '#ff8a3d' : '#ffe33d';
     this.suggestPulse = (this.suggestPulse || 0) + (dt || 0);
     const pulse = 1 + Math.sin(this.suggestPulse * 4) * 0.08;
     const r = (s.clipped ? 11 : Math.max(6, Math.min(14, s.scale * 0.4))) * pulse;
+    const radius = Math.max(24, r * 1.9);
+    if (run && avoid.length) {
+      s = separateRunMarker(this.camera, suggestion, s, layout, human, radius, avoid);
+      if (!s) return null;
+    }
     ctx.save();
     ctx.globalAlpha = 0.65;
     // Soft glow, then the disc.
     const glow = ctx.createRadialGradient(s.x, s.y, r * 0.2, s.x, s.y, r * 1.9);
-    glow.addColorStop(0, 'rgba(255,230,60,0.55)');
-    glow.addColorStop(1, 'rgba(255,230,60,0)');
+    glow.addColorStop(0, run ? 'rgba(95,245,144,0.55)' : 'rgba(255,230,60,0.55)');
+    glow.addColorStop(1, run ? 'rgba(95,245,144,0)' : 'rgba(255,230,60,0)');
     ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.arc(s.x, s.y, r * 1.9, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = suggestion.kind === 'shot' ? '#ff8a3d' : '#ffe33d';
+    ctx.fillStyle = colour;
     ctx.beginPath();
     ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = 'rgba(0,0,0,0.45)';
     ctx.lineWidth = Math.max(1.5, r * 0.1);
     ctx.stroke();
-    // A tick inside it.
+    // Kicks use a tick; movement uses a visibly different arrow.
     ctx.strokeStyle = '#1b1b1b';
     ctx.lineWidth = Math.max(2, r * 0.22);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.moveTo(s.x - r * 0.42, s.y + r * 0.02);
-    ctx.lineTo(s.x - r * 0.1, s.y + r * 0.34);
-    ctx.lineTo(s.x + r * 0.45, s.y - r * 0.36);
+    if (run) {
+      ctx.moveTo(s.x - r * 0.38, s.y + r * 0.38);
+      ctx.lineTo(s.x + r * 0.38, s.y - r * 0.38);
+      ctx.moveTo(s.x - r * 0.2, s.y - r * 0.38);
+      ctx.lineTo(s.x + r * 0.38, s.y - r * 0.38);
+      ctx.lineTo(s.x + r * 0.38, s.y + r * 0.2);
+    } else {
+      ctx.moveTo(s.x - r * 0.42, s.y + r * 0.02);
+      ctx.lineTo(s.x - r * 0.1, s.y + r * 0.34);
+      ctx.lineTo(s.x + r * 0.45, s.y - r * 0.36);
+    }
     ctx.stroke();
     if (s.clipped) {
       const d = s.direction;
       ctx.globalAlpha = 0.95;
-      ctx.fillStyle = suggestion.kind === 'shot' ? '#ff8a3d' : '#ffe33d';
+      ctx.fillStyle = colour;
       ctx.beginPath();
       ctx.moveTo(s.x + d.x * (r + 15), s.y + d.y * (r + 15));
       ctx.lineTo(s.x + d.x * (r + 5) - d.y * 4, s.y + d.y * (r + 5) + d.x * 4);
       ctx.lineTo(s.x + d.x * (r + 5) + d.y * 4, s.y + d.y * (r + 5) - d.x * 4);
       ctx.closePath();
       ctx.fill();
+    }
+    if (s.clipped || run) {
+      ctx.globalAlpha = 0.95;
       ctx.fillStyle = 'rgba(12,18,30,0.88)';
       ctx.fillRect(s.x - 28, s.y + 24, 56, 17);
-      ctx.fillStyle = '#fff4c5';
+      ctx.fillStyle = run ? '#b7ffd0' : '#fff4c5';
       ctx.font = 'bold 10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(suggestion.kind === 'shot' ? 'SHOOT' : 'PASS', s.x, s.y + 36);
+      ctx.fillText(run ? 'RUN' : suggestion.kind === 'shot' ? 'SHOOT' : 'PASS', s.x, s.y + 36);
     }
     ctx.restore();
-    return { x: s.x, y: s.y, radius: Math.max(24, r * 1.9), clipped: s.clipped, direction: s.direction };
+    return { x: s.x, y: s.y, radius, clipped: s.clipped, direction: s.direction };
   }
 
   drawFloats(ctx, layout, dt) {

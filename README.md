@@ -79,6 +79,7 @@ included, runs themselves; your job is the ball.
 | **Tap an opponent** who has the ball | Get stuck in. |
 | **Draw a line** and release | The ball is struck towards where the line ended. |
 | **Tap the tick marker** | Play the suggested pass to that teammate, or shoot when the marker is at goal. |
+| **Tap the green RUN arrow** | Carry the ball forward into the suggested open space. |
 | **SPECIAL** | Use the current player's ability; the button shows readiness, cooldown and uses. |
 
 With no input at all your player simply keeps dribbling. The ball is never
@@ -100,8 +101,11 @@ There is no separate pass and shoot button. Draw a line that ends in the net and
 that was a shot.
 
 As soon as your outfield player has the ball, play slows to 8% of normal speed
-to give you time to choose a pass. Drawing a kick freezes play and holds the
-camera fixed; releasing it resumes play. The kick keeps the view it started in.
+to give you time to choose an action. Tap open grass or the green RUN arrow
+to commit to a carry at normal match speed. Play slows again at the chosen
+destination or when an opponent blocks the route. Drawing a kick freezes
+play and holds the camera fixed; releasing it resumes play. The kick keeps
+the view it started in.
 Movement is drawn smoothly between physics updates, including in slow motion.
 Losing the carrier cancels that stroke, so release cannot accidentally kick
 through a different player.
@@ -116,6 +120,10 @@ where the game reckons the ball should go next; it reads the same pass ranking
 the AI plays by. First person, looking out from your own player, is a setting on
 the pre-match screen. Targets outside the view have an edge tick you can still
 tap to play the suggested pass or shot.
+
+When there is a clear forward lane, a separate green RUN arrow suggests
+carrying the ball instead. It never replaces the yellow pass/shot tick,
+appears only in open play, and does not use a saved maths precision charge.
 
 Players use animated 3D rigs with their selected character's skin, head and
 accessories, dressed in the chosen team kit. Walking, jogging, sprinting and

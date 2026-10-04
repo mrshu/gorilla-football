@@ -77,6 +77,7 @@ export function showHowTo(root, onBack) {
     <p>The camera is a <b>side view</b> by default, the way football is televised. First person, looking out from your own player, is a setting on the pre-match screen.</p>
     <p>Your free kicks and penalties use the taker's <b>first-person view</b> while you line up the kick and follow the ball. The view stays steady while you draw, then returns to your chosen camera at the next possession or stoppage.</p>
     <p>The player on the ball is ringed. Untaken restarts are played automatically after a few seconds.</p>
+    <p>When there is space ahead, tap the green <b>RUN</b> arrow to carry the ball forward at normal speed. You can also tap open grass to choose your own destination. Play slows again when you arrive or an opponent blocks the route; draw a kick whenever you want to pass or shoot.</p>
     <p>Restarts work the same way: aim and release to take the throw, corner, free kick or penalty.</p>
     <h4>One player</h4>
     <p>The older control styles are still here if you prefer them. Both give you a single outfield player, marked with a ring, seen from straight above.</p>

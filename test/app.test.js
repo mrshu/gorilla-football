@@ -144,6 +144,81 @@ test('possession slows immediately, while released kicks, loose balls and AI pos
   assert.equal(app.simulationDelta(0.1), 0.1, 'AI keeper can clear normally');
 });
 
+function openCarry(app, human = 0) {
+  const m = app.match;
+  const carrier = m.humanPlayer(human);
+  for (const p of m.players) {
+    if (p === carrier) continue;
+    p.pos = { x: 4 + p.slot * 8, y: p.team === carrier.team ? 2 : 66 };
+    p.vel = { x: 0, y: 0 };
+  }
+  carrier.pos = { x: 40, y: 34 };
+  carrier.kickCooldown = carrier.stun = carrier.frozen = 0;
+  m.ball.owner = carrier.id;
+  m.snapBallToOwner(carrier);
+  return carrier;
+}
+
+test('chosen carries advance at normal speed and return to decision pacing under pressure', () => {
+  for (const mode of [MODES.SOLO, MODES.COOP, MODES.VERSUS]) {
+    const app = harness({ mode });
+    const human = mode === MODES.SOLO ? 0 : 1;
+    const carrier = openCarry(app, human);
+    const dir = app.match.teams[carrier.team].attackDir;
+    assert.equal(app.match.tap(human, { x: carrier.pos.x + dir * 10, y: 34 }), true);
+    app.cameraTransition = { remaining: 0.72, total: 0.72, hold: 0.12 };
+    assert.equal(app.simulationDelta(0.1), 0.1);
+    assert.equal(app.cameraTransition, null);
+    const defender = app.match.teams[1 - carrier.team].players[6];
+    defender.pos = { x: carrier.pos.x + dir * 3.5, y: 34 };
+    assert.equal(app.simulationDelta(0.1), 0.008, 'a blocked carry restores time to decide');
+    defender.pos.y = 66;
+    carrier.pos.x += dir * 9;
+    assert.equal(app.simulationDelta(0.1), 0.008, 'arrival restores decision pacing');
+  }
+});
+
+test('starting a kick during a carry slows immediately then freezes the actual drawing', () => {
+  const app = harness();
+  const carrier = openCarry(app);
+  app.match.tap(0, { x: carrier.pos.x + 10, y: 34 });
+  assert.equal(app.simulationDelta(0.1), 0.1);
+  app.aimInput.onDown(pointer(1, 200, 700));
+  assert.equal(app.simulationDelta(0.1), 0.008);
+  app.aimInput.onMove(pointer(1, 240, 550));
+  assert.equal(app.simulationDelta(0.1), 0);
+  app.aimInput.onCancel(pointer(1, 240, 550));
+  assert.equal(app.simulationDelta(0.1), 0.1);
+});
+
+test('the green run marker routes to a carry while the yellow tick remains a kick', () => {
+  const app = harness();
+  openCarry(app);
+  const suggestion = app.match.suggestedRun(0);
+  assert.ok(suggestion);
+  app.aimInput.released.push({ human: 0, kickerId: suggestion.kickerId, tap: true, suggestion });
+  app.feedAimInput();
+  assert.equal(app.match.moveOrders[0].playerId, suggestion.kickerId);
+  assert.deepEqual(app.match.moveOrders[0].point, suggestion.point);
+  assert.equal(app.match.aimKicks[0], null);
+  assert.equal(app.simulationDelta(0.1), 0.1);
+});
+
+test('co-op uses the actual shared carrier order for movement and pacing', () => {
+  const app = harness({ mode: MODES.COOP });
+  const p = openCarry(app);
+  const m = app.match;
+  m.teams[1].players[6].pos = { x: 43.5, y: 34 };
+  m.tap(0, { x: 50, y: 34 });
+  assert.equal(app.simulationDelta(0.1), 0.008);
+  m.tap(1, { x: 30, y: 34 });
+  assert.equal(m.moveOrders[0], null, 'the latest shared-carrier order replaces the previous one');
+  assert.deepEqual(m.moveOrderFor(p), { x: 30, y: 34 });
+  assert.equal(m.isCarryingRun(0), true, 'both partners see the same carrier running');
+  assert.equal(m.isCarryingRun(1), true);
+  assert.equal(app.simulationDelta(0.1), 0.1);
+});
+
 test('either human gaining possession slows versus and shared-team play', () => {
   for (const mode of [MODES.VERSUS, MODES.COOP]) {
     const app = harness({ mode });

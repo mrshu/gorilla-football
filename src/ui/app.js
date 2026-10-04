@@ -215,9 +215,10 @@ export class App {
     const released = this.match.aimKicks.some(Boolean);
     const drawing = this.isDrawingKick();
     const choosing = this.isChoosingKick();
+    const running = this.match.humanInputs.some((_, human) => this.match.isCarryingRun(human));
     // Possession pacing replaces the automatic camera beat, so an old camera
     // hold cannot unexpectedly pause the ball after the kick is released.
-    if (released || drawing || choosing) this.cameraTransition = null;
+    if (released || drawing || choosing || running) this.cameraTransition = null;
     if (released) return dtReal;
     if (drawing) return 0;
     if (choosing) return dtReal * POSSESSION_TIME_SCALE;
@@ -409,6 +410,7 @@ export class App {
 
   offerMathsQuestion() {
     if (![SCREEN.MATCH, SCREEN.DECISION].includes(this.screen) || !this.mathsPractice) return;
+    if (this.match.humanInputs.some((_, human) => this.match.isCarryingRun(human))) return;
     if (this.aimInput.hasGesture || this.match.aimKicks.some(Boolean)) return;
     const opportunity = this.mathsPractice.nextQuestion(this.match);
     if (!opportunity) return;
@@ -493,6 +495,10 @@ export class App {
         if (r.suggestion) {
           if (r.kickerId !== this.kickOwnerFor(r.human)) {
             this.possessionNotices[r.human] = { human: r.human, text: 'Ball changed · choose again', remaining: 1.4 };
+          } else if (r.suggestion.kind === 'run') {
+            if (m.playRun(r.human, r.suggestion)) {
+              this.commandCues[r.human] = { point: { ...m.moveOrders[r.human].point }, text: 'RUN', remaining: 1.2 };
+            } else this.possessionNotices[r.human] = { human: r.human, text: 'Run blocked · choose again', remaining: 1.4 };
           } else if (!m.playSuggestion(r.human, r.suggestion)) {
             this.possessionNotices[r.human] = { human: r.human, text: 'Suggestion no longer available', remaining: 1.4 };
           }
@@ -550,7 +556,16 @@ export class App {
     if (m.state !== STATES.PLAY || m.ball.owner === null) return false;
     const owner = m.getPlayer(m.ball.owner);
     if (owner.isGK) return false;
-    return m.humanInputs.some((_, human) => m.canKick(human));
+    let canChoose = false;
+    let running = false;
+    for (let human = 0; human < m.humanInputs.length; human++) {
+      if (!m.canKick(human)) continue;
+      canChoose = true;
+      const touch = this.aimInput.aimState(human);
+      if (touch?.kickerId === owner.id) return true;
+      running ||= m.isCarryingRun(human);
+    }
+    return canChoose && !running;
   }
 
   updatePossessionFeedback(dt) {
@@ -722,11 +737,18 @@ export class App {
         this.suggestionMarkers = [];
         for (let human = 0; human < this.match.humanInputs.length; human++) {
           const suggestion = this.match.suggestedTarget(human);
-          if (!suggestion) continue;
-          const point = suggestion.playerId === null ? suggestion.point : view.getPlayer(suggestion.playerId).pos;
-          const displayed = { ...suggestion, point: { ...point } };
-          const marker = this.renderer3d.drawSuggestion(hud, displayed, human === 0 ? dt : 0, this.layout, human);
-          if (marker) this.suggestionMarkers.push({ ...marker, human, suggestion: displayed });
+          if (suggestion) {
+            const point = suggestion.playerId === null ? suggestion.point : view.getPlayer(suggestion.playerId).pos;
+            const displayed = { ...suggestion, point: { ...point } };
+            const marker = this.renderer3d.drawSuggestion(hud, displayed, human === 0 ? dt : 0, this.layout, human);
+            if (marker) this.suggestionMarkers.push({ ...marker, human, suggestion: displayed });
+          }
+          const run = this.match.suggestedRun(human);
+          if (run) {
+            const marker = this.renderer3d.drawSuggestion(hud, run, 0, this.layout, human,
+              { avoid: this.suggestionMarkers.filter((m) => m.human === human) });
+            if (marker) this.suggestionMarkers.push({ ...marker, human, suggestion: run });
+          }
         }
         for (const aim of aims) this.renderer3d.drawAim(hud, this.match, this.layout, { aim });
         this.renderer3d.drawControlCues(hud, view, this.layout, this.commandCues);
@@ -755,6 +777,8 @@ export class App {
     if (m.state === STATES.GOAL) return null;
     if (m.canKick(0)) {
       if (m.state !== STATES.PLAY) return 'Draw or tap the tick';
+      if (m.isCarryingRun(0)) return 'Running · draw to pass or shoot';
+      if (m.suggestedRun(0)) return 'Tap green RUN · draw or tap ✓ to kick';
       const suggestion = m.suggestedTarget(0);
       return suggestion ? `Draw a kick · tap the tick to ${suggestion.kind === 'shot' ? 'shoot' : 'pass'}`
         : 'Tap to move · draw to pass or shoot';
