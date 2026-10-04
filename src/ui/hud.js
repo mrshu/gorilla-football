@@ -94,21 +94,25 @@ export function drawHud(ctx, match, layout, { hint = null, possessionNotices = [
 
   if (layout.aim) drawAimControls(ctx, match, layout, possessionNotices);
 
-  ctx.font = `600 12px ${FONT}`;
   for (let i = 0; !layout.aim && i < match.humanInputs.length; i++) {
     const p = match.humanPlayer(i);
     if (!p) continue;
     const uses = Number.isFinite(p.ability.usesLeft) ? `${p.ability.usesLeft} left` : '∞ uses';
-    const label = `P${i + 1} ${p.character.name} · ${uses}${p.mathsFocus ? ' · Focused' : ''}`;
-    const width = Math.min(ctx.measureText(label).width + 16, (layout.w - 24) / match.humanInputs.length);
+    const label = `P${i + 1} ${p.character.name} · ${uses}`;
+    const status = mathsStatus(match, i);
+    ctx.font = `600 12px ${FONT}`;
+    const labelWidth = ctx.measureText(label).width;
+    ctx.font = `500 10px ${FONT}`;
+    const width = Math.min(Math.max(labelWidth, ctx.measureText(status).width) + 16, (layout.w - 24) / match.humanInputs.length);
     const x = i === 0 ? 8 : layout.w - width - 8;
     panel(ctx, x, chipY, width, 38, 5);
     ctx.fillStyle = i === 0 ? COLOUR.gold : COLOUR.teal;
     ctx.textAlign = 'left';
+    ctx.font = `600 12px ${FONT}`;
     fittedText(ctx, label, x + 8, chipY + 11, width - 16);
     ctx.font = `500 10px ${FONT}`;
-    ctx.fillStyle = COLOUR.muted;
-    fittedText(ctx, mathsStatus(match, i), x + 8, chipY + 28, width - 16);
+    ctx.fillStyle = match.hasMathsFocus?.(i) ? (i === 0 ? COLOUR.gold : COLOUR.teal) : COLOUR.muted;
+    fittedText(ctx, status, x + 8, chipY + 28, width - 16);
   }
 
   drawBanner(ctx, match, layout, hint);
@@ -125,7 +129,7 @@ function drawAimControls(ctx, match, layout, notices) {
     if (!player) continue;
     const colour = human === 0 ? COLOUR.gold : COLOUR.teal;
     const x = human === 0 ? 8 : layout.w - badgeW - 8;
-    const mode = owner?.id === player.id ? (player.mathsFocus ? 'Focused kick · draw or tap ✓'
+    const mode = owner?.id === player.id ? (match.hasMathsFocus?.(human) ? 'Focused kick · draw or tap ✓'
       : match.state === STATES.PLAY && !player.isGK ? 'Slow play · draw or tap ✓' : 'Draw or tap ✓ to kick')
       : owner && owner.team !== player.team ? 'Defending · tap to press'
         : owner ? 'Support · tap to move' : 'Loose ball · tap to chase';
@@ -139,7 +143,7 @@ function drawAimControls(ctx, match, layout, notices) {
     ctx.fillStyle = COLOUR.ivory;
     fittedText(ctx, mode, x + 11, badgeY + 32, badgeW - 22);
     ctx.font = `500 10px ${FONT}`;
-    ctx.fillStyle = COLOUR.muted;
+    ctx.fillStyle = match.hasMathsFocus?.(human) ? colour : COLOUR.muted;
     fittedText(ctx, mathsStatus(match, human), x + 11, badgeY + 49, badgeW - 22);
     const notice = notices.find((n) => n.human === human);
     if (notice) {
@@ -180,6 +184,7 @@ function drawAimControls(ctx, match, layout, notices) {
 }
 
 export function mathsStatus(match, human) {
+  if (match.hasMathsFocus?.(human)) return 'Focused kick ready';
   return match.config.humans[human]?.mathsBand > 0 ? 'Maths on · questions in attack' : 'Maths off';
 }
 

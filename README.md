@@ -195,8 +195,11 @@ The first eligible attacking possession offers a question, then roughly every
 third one; kickoff introduces the mode. Play pauses with no countdown. Skip
 without penalty, or answer and continue after feedback. Wrong answers never
 cost the ball or a turn. A correct answer earns a **Focused kick** with 40% of
-the usual aiming error on the next pass or shot in that possession. Power,
-loft, curl and character abilities keep their normal behavior.
+the usual aiming error on your next normal pass or shot. One charge is saved
+per learner through tackles, possession changes and restarts; teammates,
+dribbles and specials do not spend it. The HUD shows when it is ready, and
+a brief message marks the kick that uses it. Power, loft, curl and character
+abilities keep their normal behavior.
 
 Player 1 and player 2 have separate saved learning profiles. Difficulty adapts
 to correctness and response time. Switching practice off retains progress;

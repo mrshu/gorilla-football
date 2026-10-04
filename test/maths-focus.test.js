@@ -5,8 +5,8 @@ import { normalizeConfig } from '../src/game/config.js';
 import { STATES, SET_PIECES } from '../src/game/constants.js';
 import { angle, len } from '../src/game/vec.js';
 
-function readyMatch(control = 'aim', characterId = 'gorilla') {
-  const m = new Match(normalizeConfig({ control, seed: 43, humans: [{ characterId }] }));
+function readyMatch(control = 'aim', characterId = 'gorilla', mode = 'solo') {
+  const m = new Match(normalizeConfig({ control, mode, seed: 43, humans: [{ characterId }] }));
   m.state = STATES.PLAY;
   m.setPiece = null;
   for (const p of m.players) {
@@ -53,7 +53,7 @@ function verifyPrecision(make, kick) {
   assert.ok(Math.abs(a.speed - b.speed) < 1e-8, 'focus does not add speed');
   assert.equal(a.vz, b.vz, 'focus does not alter loft');
   assert.equal(a.spin, b.spin, 'focus does not alter curl');
-  assert.equal(focused.kicker.mathsFocus, false, 'one actual kick consumes the focus');
+  assert.equal(focused.m.hasMathsFocus(0), false, 'one actual kick consumes the focus');
   assert.equal(focused.m.ball.unstoppable, false);
   assert.equal(focused.m.ball.homing, null);
 }
@@ -124,7 +124,7 @@ test('granting focus validates carrier identity, human control and readiness', (
     const { m, kicker } = readyMatch();
     invalidate(m, kicker);
     assert.equal(m.grantMathsFocus(0, kicker.id), false);
-    assert.ok(!kicker.mathsFocus);
+    assert.ok(!m.hasMathsFocus(0));
   }
   const { m, kicker } = readyMatch();
   assert.equal(m.grantMathsFocus(99, kicker.id), false);
@@ -146,15 +146,15 @@ test('invalid queued suggestions and rejected strokes do not consume a valid foc
   const { m, kicker, receiver } = readyMatch();
   assert.ok(m.grantMathsFocus(0, kicker.id));
   assert.equal(m.aimPath(0, [{ x: 60, y: 34 }, { x: 70, y: 25 }, { x: 60, y: 34 }]), false);
-  assert.equal(kicker.mathsFocus, true);
+  assert.equal(m.hasMathsFocus(0), true);
   assert.equal(m.aimKick(0, { x: 1, y: 0 }, NaN), false);
-  assert.equal(kicker.mathsFocus, true);
+  assert.equal(m.hasMathsFocus(0), true);
   const marker = { kind: 'pass', playerId: receiver.id, point: { ...receiver.pos }, kickerId: kicker.id, setPieceKind: null };
   assert.ok(m.playSuggestion(0, marker));
   receiver.sentOff = true;
   m.applyAimInputs();
   assert.equal(m.ball.owner, kicker.id);
-  assert.equal(kicker.mathsFocus, true);
+  assert.equal(m.hasMathsFocus(0), true);
 });
 
 test('a queued aimed kick invalidated by recovery does not consume focus or fire', () => {
@@ -165,7 +165,7 @@ test('a queued aimed kick invalidated by recovery does not consume focus or fire
     kicker[recovery] = 1;
     m.applyAimInputs();
     assert.equal(m.ball.owner, kicker.id);
-    assert.equal(kicker.mathsFocus, true);
+    assert.equal(m.hasMathsFocus(0), true);
     assert.equal(m.aimKicks[0], null);
   }
 });
@@ -174,43 +174,103 @@ test('focus is consumed once and does not carry into the same player’s next po
   const { m, kicker, receiver } = readyMatch();
   const baseline = readyMatch();
   assert.ok(m.grantMathsFocus(0, kicker.id));
-  m.passTo(kicker, receiver);
-  assert.equal(kicker.mathsFocus, false);
+  m.passTo(kicker, receiver, { humanIndex: 0 });
+  assert.equal(m.hasMathsFocus(0), false);
   m.ball.owner = kicker.id;
-  m.passTo(kicker, receiver);
-  baseline.m.passTo(baseline.kicker, baseline.receiver);
+  m.passTo(kicker, receiver, { humanIndex: 0 });
+  baseline.m.passTo(baseline.kicker, baseline.receiver, { humanIndex: 0 });
   assert.deepEqual(m.ball.vel, baseline.m.ball.vel);
 });
 
-test('losing possession clears focus on a loose ball, teammate handoff, turnover and restart', () => {
+test('a banked charge survives loose balls, turnovers, teammate handoffs and restarts', () => {
   for (const lose of [
     (m) => m.releaseBall(),
     (m, p, r) => m.collectBall(r),
     (m) => m.collectBall(m.teams[1].players[6]),
     (m) => m.beginSetPiece({ kind: SET_PIECES.FREE_KICK, team: 0, pos: { x: 60, y: 34 } }),
+    (m, p, r) => { m.ball.owner = r.id; m.step(0); },
+    (m) => m.endHalf(),
+    (m) => m.scoreGoal(1),
   ]) {
     const { m, kicker, receiver } = readyMatch();
     assert.ok(m.grantMathsFocus(0, kicker.id));
     lose(m, kicker, receiver);
-    assert.equal(kicker.mathsFocus, false);
+    assert.equal(m.hasMathsFocus(0), true);
   }
-  const { m, kicker, receiver } = readyMatch();
-  assert.ok(m.grantMathsFocus(0, kicker.id));
-  m.ball.owner = receiver.id;
-  m.step(0);
-  assert.equal(kicker.mathsFocus, false, 'frame cleanup also catches a direct carrier handoff');
 });
 
 test('non-kicking abilities preserve precision while intentional homing shots remain unchanged', () => {
   const { m, kicker } = readyMatch('aim', 'plumber');
   assert.ok(m.grantMathsFocus(0, kicker.id));
   assert.ok(m.tryActivateAbility(kicker));
-  assert.equal(kicker.mathsFocus, true, 'Turbo Hop uses no aiming accuracy');
+  assert.equal(m.hasMathsFocus(0), true, 'Turbo Hop uses no aiming accuracy');
   assert.equal(m.ball.owner, kicker.id);
 
   const slam = readyMatch();
   assert.ok(slam.m.grantMathsFocus(0, slam.kicker.id));
   assert.ok(slam.m.tryActivateAbility(slam.kicker));
   assert.equal(slam.m.ball.unstoppable, true, 'Gorilla’s existing intentional special is unchanged');
-  assert.equal(slam.kicker.mathsFocus, false, 'leaving possession clears unused focus');
+  assert.equal(slam.m.hasMathsFocus(0), true, 'special shots preserve the saved normal kick');
+});
+
+test('whole-team rewards follow the learner across carriers and co-op input ownership', () => {
+  const { m, kicker, receiver } = readyMatch('aim', 'gorilla', 'coop');
+  assert.ok(m.grantMathsFocus(0, kicker.id));
+  assert.equal(m.grantMathsFocus(0, kicker.id), false, 'only one charge can be banked');
+  assert.ok(m.grantMathsFocus(1, kicker.id));
+  m.ball.owner = receiver.id;
+  receiver.kickCooldown = 0;
+  assert.ok(m.aimKick(1, { x: 1, y: 0 }, 0.5));
+  m.applyAimInputs();
+  assert.equal(m.hasMathsFocus(1), false, 'the human issuing the kick spends their charge');
+  assert.equal(m.hasMathsFocus(0), true, 'their partner keeps a separate charge');
+  const uses = m.drainEvents().filter(e => e.type === 'mathsfocusused');
+  assert.equal(uses.length, 1);
+  assert.equal(uses[0].humanIndex, 1);
+  assert.equal(uses[0].playerId, receiver.id, 'feedback identifies the actual kicker');
+});
+
+test('a co-op partner without a reward cannot spend the other learner’s charge', () => {
+  const { m, kicker } = readyMatch('aim', 'gorilla', 'coop');
+  assert.ok(m.grantMathsFocus(0, kicker.id));
+  assert.ok(m.aimKick(1, { x: 1, y: 0 }, 0.5));
+  m.applyAimInputs();
+  assert.equal(m.hasMathsFocus(0), true);
+  assert.equal(m.drainEvents().some(e => e.type === 'mathsfocusused'), false);
+});
+
+test('AI kicks and automatic restarts leave a banked reward available', () => {
+  for (const control of ['aim', 'manual', 'assisted']) {
+    const { m, kicker, receiver } = readyMatch(control);
+    assert.ok(m.grantMathsFocus(0, kicker.id));
+    m.ball.owner = receiver.id;
+    m.passTo(receiver, kicker);
+    assert.equal(m.hasMathsFocus(0), true, `${control}: an AI teammate cannot spend the charge`);
+    m.beginSetPiece({ kind: SET_PIECES.PENALTY, team: 0, pos: { x: 94, y: 34 } });
+    m.snapToSetPiece();
+    m.setPiece.lerp = 1;
+    m.takeSetPiece(m.getPlayer(m.setPiece.takerId), 'auto', null);
+    assert.equal(m.hasMathsFocus(0), true, `${control}: the restart timeout cannot spend the charge`);
+    assert.equal(m.drainEvents().some(e => e.type === 'mathsfocusused'), false);
+  }
+});
+
+test('simultaneous manual or paced buttons cannot overwrite the kick that spends focus', () => {
+  for (const control of ['manual', 'assisted']) {
+    const one = readyMatch(control);
+    const both = readyMatch(control);
+    const controller = control === 'manual' ? 'controlHuman' : 'controlAssistedHuman';
+    for (const { m, kicker, receiver } of [one, both]) {
+      assert.ok(m.grantMathsFocus(0, kicker.id));
+      m.choosePassTarget = () => receiver;
+    }
+    const input = { move: { x: 0, y: 0 }, pass: true, shoot: false, special: false };
+    one.m[controller](one.kicker, input, 1 / 60);
+    both.m[controller](both.kicker, { ...input, shoot: true }, 1 / 60);
+    assert.deepEqual(both.m.ball.vel, one.m.ball.vel);
+    assert.equal(both.m.hasMathsFocus(0), false);
+    const events = both.m.drainEvents();
+    assert.equal(events.filter(e => e.type === 'mathsfocusused').length, 1);
+    assert.equal(events.filter(e => e.type === 'kick').length, 1);
+  }
 });

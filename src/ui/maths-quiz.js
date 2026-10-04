@@ -346,7 +346,7 @@ export function showMathsQuiz(root, question, {
   header.append(identity, element('span', 'mq-prize', preview ? (previewLabel || 'Preview') : 'Focused kick'));
   const lead = element('p', 'mq-lead', preview
     ? 'Try a sample question. Preview answers do not change your practice progress.'
-    : 'Get it right for a more accurate next kick.');
+    : 'Earn a more accurate next pass or shot. Keep it until you use it.');
   lead.id = `${id}-lead`;
   const prompt = element('div', 'mq-question');
   prompt.setAttribute('role', 'math');
@@ -403,7 +403,7 @@ export function showMathsQuiz(root, question, {
       if (!correct) button.classList.add('mq-wrong');
       feedback.textContent = preview
         ? (correct ? 'Correct! Your practice progress is unchanged.' : `The correct answer is ${question.answer}. Your practice progress is unchanged.`)
-        : (correct ? 'Correct! Focused kick earned for your next pass or shot.' : `The correct answer is ${question.answer}. Keep playing and try the next one.`);
+        : (correct ? 'Correct! Focused kick earned. Saved for your next pass or shot.' : `The correct answer is ${question.answer}. Keep playing and try the next one.`);
       feedback.classList.toggle('mq-success', correct);
       panel.classList.add('mq-answered');
       pauseNote.hidden = true;

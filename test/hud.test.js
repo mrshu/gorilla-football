@@ -96,6 +96,24 @@ test('match badges show the maths preference independently for each player', () 
   assert.ok(off.x < on.x, 'the P2 setting is shown in the P2 badge');
 });
 
+test('saved maths reward stays visible when defending and clears after its kick', () => {
+  const match = playingMatch();
+  const kicker = match.humanPlayer(0);
+  assert.ok(match.grantMathsFocus(0, kicker.id));
+  match.ball.owner = match.teams[1].players[6].id;
+  const layout = computeAimLayout(390, 844, 1, 1);
+  const canvas = textCanvas();
+  drawHud(canvas, match, layout);
+  assert.ok(canvas.texts.includes('Defending · tap to press'));
+  assert.ok(canvas.texts.includes('Focused kick ready'));
+  match.ball.owner = kicker.id;
+  assert.ok(match.aimKick(0, { x: 1, y: 0 }, 0.5));
+  match.applyAimInputs();
+  canvas.texts.length = 0;
+  drawHud(canvas, match, layout);
+  assert.ok(!canvas.texts.includes('Focused kick ready'));
+});
+
 test('phone and versus HUDs keep long labels on screen without changing touch targets', () => {
   for (const mode of ['solo', 'versus']) {
     const match = new Match(normalizeConfig({ mode }));

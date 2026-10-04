@@ -626,6 +626,16 @@ export class App {
     const m = this.match;
     for (const e of events) {
       switch (e.type) {
+        case 'mathsfocusused':
+          if (this.isAim) {
+            this.possessionNotices[e.humanIndex] = {
+              human: e.humanIndex, text: 'Focused kick used', remaining: 1.8,
+            };
+          } else {
+            this.activeRenderer.addFloat('Focused kick used', m.getPlayer(e.playerId).pos,
+              e.humanIndex === 0 ? '#ffe600' : '#00e5ff');
+          }
+          break;
         case 'goal': {
           const t = m.teams[e.team];
           this.activeRenderer.addFloat('GOAL!', m.ball.pos, t.jersey.primary);

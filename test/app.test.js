@@ -464,3 +464,23 @@ test('entering a direct kick eases from the existing camera rather than cutting'
   assert.ok(moved > 0 && moved < 3, `first frame must ease, moved ${moved}m`);
   assert.ok(after.z > 10, 'first frame must not cut directly to head height');
 });
+
+test('spending a maths charge shows feedback in each control mode', () => {
+  for (const control of [CONTROL.AIM, CONTROL.MANUAL, CONTROL.ASSISTED]) {
+    const app = harness({ control });
+    const floats = [];
+    const renderer = { addFloat: (...args) => floats.push(args) };
+    if (control === CONTROL.AIM) app.renderer3d = renderer;
+    else app.renderer = renderer;
+    const kicker = app.match.humanPlayer(0);
+    app.handleEvents([{ type: 'mathsfocusused', humanIndex: 0, playerId: kicker.id }]);
+    if (control === CONTROL.AIM) {
+      assert.deepEqual(app.possessionNotices[0], {
+        human: 0, text: 'Focused kick used', remaining: 1.8,
+      });
+      app.updatePossessionFeedback(2);
+      assert.ok(app.possessionNotices[0].remaining <= 0, 'feedback expires in real time');
+      assert.deepEqual(floats, []);
+    } else assert.deepEqual(floats, [['Focused kick used', kicker.pos, '#ffe600']]);
+  }
+});

@@ -79,11 +79,14 @@ test('questions wait for an attacking-half ready outfielder and an available foc
     assert.equal(practice.nextQuestion(match), null);
     carrier[flag] = 0;
   }
-  for (const flag of ['isGK', 'sentOff', 'mathsFocus']) {
+  for (const flag of ['isGK', 'sentOff']) {
     carrier[flag] = true;
     assert.equal(practice.nextQuestion(match), null);
     carrier[flag] = false;
   }
+  assert.ok(match.grantMathsFocus(0, carrier.id));
+  assert.equal(practice.nextQuestion(match), null, 'a full reward slot suppresses questions');
+  match.mathsFocus[0] = false;
   const opportunity = practice.nextQuestion(match);
   assert.ok(opportunity);
   assert.equal(practice.nextQuestion(match), null);

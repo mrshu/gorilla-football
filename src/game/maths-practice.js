@@ -88,10 +88,10 @@ export class MathsPractice {
     if (!identity || this.accounted || (restart && (restart.lerp < 1 || restart.taken))) return null;
     const carrier = match.getPlayer(ownerId);
     if (!carrier || carrier.isGK || carrier.sentOff || carrier.stun > 0
-        || carrier.frozen > 0 || carrier.kickCooldown > 0 || carrier.mathsFocus) return null;
+        || carrier.frozen > 0 || carrier.kickCooldown > 0) return null;
     const aim = this.config.aimControl ?? this.config.control === 'aim';
     const candidates = this.config.humans.map((human, humanIndex) => ({ human, humanIndex }))
-      .filter(({ human, humanIndex }) => this.enabledBands[humanIndex] > 0
+      .filter(({ human, humanIndex }) => this.enabledBands[humanIndex] > 0 && !match.hasMathsFocus(humanIndex)
         && carrier.team === human.team && (aim || carrier.human === humanIndex)
         && ((carrier.pos.x - PITCH.length / 2) * match.teams[carrier.team].attackDir >= 0
           || (restart?.kind === SET_PIECES.KICKOFF && this.eligibleCounts[humanIndex] === 0)));

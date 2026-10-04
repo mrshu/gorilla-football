@@ -417,17 +417,22 @@ export class Renderer {
       const uses = Number.isFinite(p.ability.usesLeft) ? `${p.ability.usesLeft}` : '∞';
       const ready = p.ability.cooldown <= 0 && p.ability.usesLeft > 0;
       const label = `P${i + 1} ${p.character.name} · ${uses}${ready ? '' : ' …'}`;
+      const status = mathsStatus(match, i);
       ctx.font = '600 11px system-ui, sans-serif';
-      const w = ctx.measureText(label).width + 12;
+      const labelWidth = ctx.measureText(label).width;
+      ctx.font = '500 10px system-ui, sans-serif';
+      const w = Math.min(Math.max(labelWidth, ctx.measureText(status).width) + 12,
+        (layout.w - 24) / match.humanInputs.length);
       const x = i === 0 ? 8 : layout.w - w - 8;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       roundRect(ctx, x, chipY, w, 34, 6);
       ctx.fill();
       ctx.fillStyle = ready ? col : 'rgba(255,255,255,0.5)';
-      ctx.fillText(label, x + 6, chipY + 9);
+      ctx.font = '600 11px system-ui, sans-serif';
+      ctx.fillText(label, x + 6, chipY + 9, w - 12);
       ctx.font = '500 10px system-ui, sans-serif';
-      ctx.fillStyle = '#adb8c7';
-      ctx.fillText(mathsStatus(match, i), x + 6, chipY + 25, w - 12);
+      ctx.fillStyle = match.hasMathsFocus?.(i) ? col : '#adb8c7';
+      ctx.fillText(status, x + 6, chipY + 25, w - 12);
     }
 
     // Cards ticker

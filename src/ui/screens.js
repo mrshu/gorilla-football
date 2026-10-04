@@ -101,7 +101,7 @@ export function showHowTo(root, onBack) {
     <p>Two-player matches give each person their own joystick and buttons so two people can hold the same device.</p>
     <h4>Optional maths practice</h4>
     <p>Choose a starting age for each player before kickoff. Occasional questions pause play during attacking possession. You can always skip; wrong answers reveal the answer and cost no turn.</p>
-    <p>A correct answer earns a <b>Focused kick</b>: your next pass or shot has less aiming error. The bonus lasts for this possession. Speed, loft and curl keep their usual physics.</p>
+    <p>A correct answer saves one <b>Focused kick</b> for your next pass or shot. It stays ready when you lose the ball. Specials and dribbling keep it ready; the bonus improves accuracy without changing speed, loft or curl.</p>
     <p>Difficulty adapts to each player's answers and progress stays on this device. Switching maths off retains that progress; selecting a different starting age starts that player's practice afresh.</p>
   `));
   const back = el('button', 'btn', 'Back');
@@ -318,7 +318,7 @@ export function showSetup(root, initial, { onStart, onBack }) {
     const hint = el('p', 'foot');
     hint.id = `maths-hint-${i}`;
     hint.textContent = state.humans[i].mathsBand
-      ? 'Skippable match questions earn a more accurate kick. Difficulty adapts; progress stays on this device.'
+      ? 'Skippable questions save a more accurate next pass or shot. Difficulty adapts; progress stays on this device.'
       : 'Choose a starting age to enable maths and preview a question. Off keeps this player’s match football-only.';
     select.setAttribute('aria-describedby', hint.id);
     preview.setAttribute('aria-describedby', hint.id);
